@@ -1,0 +1,17 @@
+fetcher_policy:
+  agent_name: test
+  email_address: test@domain.com
+  web_address: http://test.domain.com
+  min_response_rate: 0
+  max_content_size:
+  - content_type: default
+    size: 1000
+  - content_type: image/png
+    size: 5000
+  crawl_end_time: 15000
+  crawl_delay: 0
+  max_redirects: 20
+  accept_language: en-us,en-gb,en;q=0.7,*;q=0.3
+  valid_mime_types: text/html,image/png
+  redirect_mode: follow_none
+  request_timeout: 20000

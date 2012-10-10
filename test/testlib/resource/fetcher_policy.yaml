@@ -1,0 +1,15 @@
+fetcher_policy:
+  min_response_rate: 0
+  max_content_size:
+  - content_type: default
+    size: 1000
+  crawl_end_time: 15000
+  crawl_delay: 0
+  max_redirects: 20
+  accept_language: en-us,en-gb,en;q=0.7,*;q=0.3
+  valid_mime_types: text/html
+  max_connections_per_shard: 2
+  max_requests_per_connection: 2
+  fetch_mode: complete
+  redirect_mode: follow_all
+  request_timeout: 20000
