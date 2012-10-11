@@ -8,6 +8,6 @@ Discussion group: http://groups.google.com/group/lakshmi-groups
 Check the site for up-to-date status, latest version, getting started guide and other documentation.
 
 Archive contents:
-- demo           : demo application that uses the Lakshmi
-- src            : python source code for the Lakshmi
-- test           : tests for the Lakshmi
+- demo           : demo application that uses the lakshmi
+- src            : python source code for the lakshmi
+- test           : tests for the lakshmi
