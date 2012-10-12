@@ -195,8 +195,15 @@ def _robots_fetch_map(data):
   fetcher = fetchers.SimpleHttpFetcher(1, fetcher_policy_yaml.fetcher_policy)
   k, url = data
   logging.debug("data"+str(k)+":"+str(url))
-  result = fetcher.get("%s/robots.txt" % str(url))
-  yield (url, result.get("content"))
+  content = ""
+  try:
+    result = fetcher.get("%s/robots.txt" % str(url))
+    content = result.get("content")
+  except Exception as e:
+    logging.warning("Robots.txt Fetch Error Occurs:" + e.message)
+    content = "User-agent: *\nAllow: /"
+
+  yield (url, content)
   
 class _RobotsFetchPipeline(base_handler.PipelineBase):
   """Pipeline to execute RobotFetch jobs.
@@ -418,12 +425,19 @@ class ExtractOutlinksPipeline(base_handler.PipelineBase):
             crawl_depth += 1
             for url in urls:
               parsed_uri = urlparse(url)
+              # To use url as a key, requires to string size is lower to 500 characters.
+              if len(parsed_uri) > 500:
+                continue
+
               if parsed_uri.scheme == "http" or parsed_uri.scheme == "https":
-                crawl_db_datum = CrawlDbDatum(
-                    parent=ndb.Key(CrawlDbDatum, url),
-                    url=url,
-                    last_status=UNFETCHED,
-                    crawl_depth=crawl_depth)
-                crawl_db_datum.put()
+                #If parsed outlink url has existing in datum, not put.
+                temp_crawldatums = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, url))
+                if len(temp_crawldatums) == 0:
+                  crawl_db_datum = CrawlDbDatum(
+                      parent=ndb.Key(CrawlDbDatum, url),
+                      url=url,
+                      last_status=UNFETCHED,
+                      crawl_depth=crawl_depth)
+                  crawl_db_datum.put()
 
         url = blob_reader.readline()

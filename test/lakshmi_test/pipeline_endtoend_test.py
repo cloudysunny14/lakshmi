@@ -103,7 +103,7 @@ class FetchPipelineEndtoEndTest(testutil.HandlerTestBase):
         content=static_robots,
         headers={"Content-Length": len(static_robots)})
     #static resource is read from resource
-    resource = self.getResource("karlie.html")
+    resource = self.getResource("cloudysunny14.html")
     static_content = resource.read()
     static_content_length = len(static_content)
     self.setReturnValue(url="http://foo.com/bar.html",

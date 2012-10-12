@@ -69,7 +69,7 @@ class FetchedDatum(ndb.Model):
   content_type = ndb.StringProperty()
   content_size = ndb.IntegerProperty()
   response_rate = ndb.IntegerProperty()
-  http_headers = ndb.StringProperty()
+  http_headers = ndb.TextProperty()
 
   @classmethod
   def kind(cls):

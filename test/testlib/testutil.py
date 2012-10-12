@@ -32,6 +32,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from urlparse import urlparse
 
 from google.appengine.api import apiproxy_stub_map
 from google.appengine.api import apiproxy_stub
@@ -80,9 +81,14 @@ class URLFetchServiceMock(apiproxy_stub.APIProxyStub):
     response.set_contentwastruncated(return_values.get("content_was_truncated", False))
     if return_values.get("duration"):
       time.sleep(long(return_values.get("duration")))
-    self.request = request
-    self.response = response
 
+    parsed_uri = urlparse(request.url())
+    if parsed_uri.scheme == "http" or parsed_uri.scheme == "https":
+      self.request = request
+      self.response = response
+    else:
+      raise Exception("Invalid Url.")
+    
 class MatchesDatastoreConfig(mox.Comparator):
   """Mox comparator for MatchesDatastoreConfig objects."""
 

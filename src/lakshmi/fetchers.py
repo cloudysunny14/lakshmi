@@ -167,7 +167,7 @@ class SimpleHttpFetcher(FetcherBase):
     status_code = result.status_code
     logging.debug("status code: %d Content-Length: %s, Location: %s" % (status_code,
                   headers.get("content-length", ""),
-                  headers.get(";ocation", "")))
+                  headers.get("location", "")))
     
     #Fetch error was occurred.
     #If redirect_mode is FOLLOW_NONE, and HTTP status is redirected raises RedirectError.
@@ -240,9 +240,9 @@ class SimpleHttpFetcher(FetcherBase):
             "time": self._time(),
             "content_text": content_text,
             "content_binary": content_binary,
-            "content_length": target_length,
+            "content_length": int(target_length),
             "mime_type": mime_type,
-            "read_rate": read_rate,
+            "read_rate": int(read_rate),
             "headers": result.headers}
     
   def abort(self):

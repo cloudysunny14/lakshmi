@@ -123,7 +123,7 @@ class RobotFetcherPipelineTest(testutil.HandlerTestBase):
                         headers={"Content-Length": len(static_content),
                                  "Content-Type": "text/html"})
     print("blobKeys" + str(blob_keys))
-    p = pipelines._RobotsFetchPipeline("RobotsFetchPipeline", blob_keys)
+    p = pipelines._RobotsFetchPipeline("RobotsFetchPipeline", blob_keys, 2)
     p.start()
     
     test_support.execute_until_empty(self.taskqueue)
@@ -138,8 +138,46 @@ class RobotFetcherPipelineTest(testutil.HandlerTestBase):
       proto.ParseFromString(binary_record)
       key = proto.key()
       value = proto.value()
-      self.assertTrue(key!=None)
-      self.assertTrue(value!=None)
+      self.assertTrue(key is not None)
+      self.assertTrue(value is not None)
+  
+  def createInvalidMockData(self):
+    blob_keys = []
+    url = "invalidScheme://test_url.com"
+    file_path = files.blobstore.create("text/plain", url)
+    with files.open(file_path, 'a') as fp:
+      fp.write(url)
+    files.finalize(file_path)
+    blob_key = files.blobstore.get_blob_key(file_path)
+    file_name = files.blobstore.get_file_name(blob_key)
+    blob_keys.append(str(file_name))
+
+    return blob_keys
+
+  def testFetchError(self):
+    blob_keys = self.createInvalidMockData()
+    static_content = "User-agent: *\nDisallow: /search\nDisallow: /sdch\nDisallow: /groups"
+    self.setReturnValue(content=static_content,
+                        headers={"Content-Length": len(static_content),
+                                 "Content-Type": "text/html"})
+    print("blobKeys" + str(blob_keys))
+    p = pipelines._RobotsFetchPipeline("RobotsFetchPipeline", blob_keys, 2)
+    p.start()
+    
+    test_support.execute_until_empty(self.taskqueue)
+    finished_map = pipelines._RobotsFetchPipeline.from_id(p.pipeline_id)
+    
+    # Can open files
+    file_list = finished_map.outputs.default.value
+    self.assertTrue(len(file_list) > 0)
+    reader = input_readers.RecordsReader(file_list, 0)
+    for binary_record in reader:
+      proto = file_service_pb.KeyValue()
+      proto.ParseFromString(binary_record)
+      key = proto.key()
+      value = proto.value()
+      self.assertEquals("invalidScheme://test_url.com", key)
+      self.assertEquals("User-agent: *\nAllow: /", value)
 
 class FetchSetsBufferPipelineTest(testutil.HandlerTestBase):
   """Tests for FetchSetsBufferPipeline."""
@@ -191,8 +229,8 @@ class FetchSetsBufferPipelineTest(testutil.HandlerTestBase):
       proto.ParseFromString(binary_record)
       key = proto.key()
       value = proto.value()
-      self.assertTrue(key!=None)
-      self.assertTrue(value!=None)
+      self.assertTrue(key is not None)
+      self.assertTrue(value is not None)
 
 class FetchPipelineTest(testutil.HandlerTestBase):
   """Tests for FetchPipelineTest."""
@@ -231,7 +269,7 @@ class FetchPipelineTest(testutil.HandlerTestBase):
     self.setReturnValue(content=static_content,
                         headers={"Content-Length": len(static_content),
                                  "Content-Type": "text/html"})
-    p = pipelines._FetchPipeline("FetchPipeline", [file_name1, file_name2])
+    p = pipelines._FetchPipeline("FetchPipeline", [file_name1, file_name2], 2)
     p.start()
     test_support.execute_until_empty(self.taskqueue)
     finished_map = pipelines._FetchPipeline.from_id(p.pipeline_id)
@@ -246,7 +284,7 @@ class FetchPipelineTest(testutil.HandlerTestBase):
     entity = entities[0]
     fetched_datums = FetchedDatum.fetch_fetched_datum(entity.key)
     fetched_datum = fetched_datums[0]
-    self.assertTrue(fetched_datum!=None)
+    self.assertTrue(fetched_datum is not None)
 
 if __name__ == "__main__":
   unittest.main()
