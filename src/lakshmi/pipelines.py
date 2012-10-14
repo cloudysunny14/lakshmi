@@ -258,7 +258,12 @@ def _makeFetchSetBufferMap(binary_record):
 
   for entity in entities:
     url = entity.url
-    can_fetch = rp.can_fetch(user_agent, url)
+    try:
+      can_fetch = rp.can_fetch(user_agent, url)
+    except Exception as e:
+      logging.warning("RobotFileParser raises exception:" + e.message)
+      can_fetch = False
+
     yield (url, can_fetch)
 
 class _FetchSetsBufferPipeline(base_handler.PipelineBase):
