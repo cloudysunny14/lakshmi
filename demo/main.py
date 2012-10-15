@@ -20,6 +20,7 @@
 __author__ = """cloudysunny14@gmail.com (Kiyonari Harigae)"""
 
 import time
+import re
 
 from google.appengine.ext.webapp.util import run_wsgi_app
 from google.appengine.ext import ndb
@@ -48,13 +49,20 @@ class AddRootUrlsHandler(webapp.RequestHandler):
 
     self.response.out.write("SETTING %d ROOT URL IS SUCCESS"%insert_num)
 
+def _htmlOutlinkParser(content):
+  """htmlOutlinkParser for testing"""
+  return re.findall(r'href=[\'"]?([^\'" >]+)', "".join(content))
+
 class FetchStart(webapp.RequestHandler):
   def get(self):
     pipeline = pipelines.FetcherPipeline("FetcherPipeline",
         params={
           "entity_kind": ENTITY_KIND
         },
-        shards=16)
+        parser_params={
+          "text/html": "main._htmlOutlinkParser"
+        },
+        shards=8)
     pipeline.start()
     path = pipeline.base_path + "/status?root=" + pipeline.pipeline_id
     self.redirect(path)
