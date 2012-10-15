@@ -17,6 +17,7 @@
 import os
 import unittest
 import time
+import re
 
 from google.appengine.ext import ndb
 from google.appengine.api import apiproxy_stub
@@ -78,6 +79,10 @@ class URLFetchServiceMockForUrl(apiproxy_stub.APIProxyStub):
     self.request = request
     self.response = response
 
+def _htmlOutlinkParser(content):
+  "htmlOutlinkParser for testing"
+  return re.findall(r'href=[\'"]?([^\'" >]+)', content)
+
 class FetchPipelineEndtoEndTest(testutil.HandlerTestBase):
   """Test for FetchPipeline"""
 
@@ -110,10 +115,12 @@ class FetchPipelineEndtoEndTest(testutil.HandlerTestBase):
         content=static_content,
         headers={"Content-Length": static_content_length,
             "Content-Type": "text/html"})
-
     p = pipelines.FetcherPipeline("FetcherPipeline",
         params={
           "entity_kind": "lakshmi.datum.CrawlDbDatum"
+        },
+        parser_params={
+          "text/html": __name__ + "._htmlOutlinkParser"
         },
         shards=2)
     p.start()
@@ -130,5 +137,50 @@ class FetchPipelineEndtoEndTest(testutil.HandlerTestBase):
     for crawl_db_datum in crawl_db_datums:
       self.assertEquals(1, crawl_db_datum.crawl_depth)
 
+def _parserNotOutlinks(cotent):
+  return None
+
+class FetchPipelineWithSpecifiedParserTest(testutil.HandlerTestBase):
+  """Test for FetchPipeline"""
+  def setUp(self):
+    testutil.HandlerTestBase.setUp(self, urlfetch_mock=URLFetchServiceMockForUrl())
+    pipeline.Pipeline._send_mail = self._send_mail
+    self.emails = []
+  
+  def _send_mail(self, sender, subject, body, html=None):
+    """Callback function for sending mail."""
+    self.emails.append((sender, subject, body, html))
+
+  def getResource(self, file_name):
+    """ to get contents from resource"""
+    path = os.path.join(os.path.dirname(__file__), "resource", file_name)
+    return open(path)
+
+  def testFetchEndToEnd(self):
+    """Test for through of fetcher job"""
+    createMockCrawlDbDatum("http://foo.com/bar.txt")
+    static_robots = "User-agent: test\nDisallow: /content_0\nDisallow: /content_1\nDisallow: /content_3"
+    self.setReturnValue(url="http://foo.com/robots.txt",
+        content=static_robots,
+        headers={"Content-Length": len(static_robots),
+          "content-type": "text/plain"})
+    
+    static_content = "test"
+    static_content_length = len(static_content)
+    self.setReturnValue(url="http://foo.com/bar.txt",
+        content=static_content,
+        headers={"Content-Length": static_content_length,
+            "Content-Type": "text/plain"})
+    p = pipelines.FetcherPipeline("FetcherPipeline",
+        params={
+          "entity_kind": "lakshmi.datum.CrawlDbDatum"
+        },
+        parser_params={
+          "text/plain": __name__ + "._parserNotOutlinks"
+        },
+        shards=2)
+    p.start()
+    test_support.execute_until_empty(self.taskqueue)
+    
 if __name__ == "__main__":
   unittest.main()

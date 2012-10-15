@@ -17,7 +17,6 @@
 import logging
 import robotparser
 import datetime
-import re
 
 from mapreduce.lib.files import file_service_pb
 
@@ -32,9 +31,10 @@ from mapreduce import input_readers
 from mapreduce import mapper_pipeline
 from mapreduce.lib import pipeline
 from mapreduce.lib import files
-
 from mapreduce.lib.pipeline import common as pipeline_common
 from mapreduce import output_writers
+from mapreduce import util
+
 from lakshmi import configuration
 from lakshmi import fetchers
 from lakshmi.datum import CrawlDbDatum
@@ -378,6 +378,9 @@ class FetcherPipeline(base_handler.PipelineBase):
   Args:
     job_name: job name as string.
     params: params for fetch job.
+    parser_params: Params for extract outlink parser for each mime-types,
+      The parser is user defined function for each mime-types, which returns 
+      outlinks url list.
     shards: number of shard for fetch job.
   Returns:
     The list of filenames as string. Resulting files contain serialized
@@ -387,6 +390,7 @@ class FetcherPipeline(base_handler.PipelineBase):
   def run(self,
           job_name,
           params,
+          parser_params,
           shards):
     extract_domain_files = yield _ExactDomainMapreducePipeline(job_name,
         params=params,
@@ -394,7 +398,7 @@ class FetcherPipeline(base_handler.PipelineBase):
     robots_files = yield _RobotsFetchPipeline(job_name, extract_domain_files, shards)
     fetch_set_buffer_files = yield _FetchSetsBufferPipeline(job_name, robots_files)
     result_files = yield _FetchPipeline(job_name, fetch_set_buffer_files, shards)
-    yield ExtractOutlinksPipeline(result_files)
+    yield ExtractOutlinksPipeline(result_files, parser_params)
     temp_files = [extract_domain_files, robots_files, fetch_set_buffer_files, result_files]
     with pipeline.After(result_files):
       all_temp_files = yield pipeline_common.Extend(*temp_files)
@@ -409,9 +413,13 @@ class ExtractOutlinksPipeline(base_handler.PipelineBase):
 
   Args:
     file_names: Input filenames, consists from results of fetch job.
+    parser_params: Params for extract outlink parser for each mime-types,
+      The parser is user defined function for each mime-types, which returns 
+      outlinks url list.
   """
   def run(self,
-          file_names):
+          file_names,
+          parser_params):
     for file_name in file_names:
       blob_key = files.blobstore.get_blob_key(file_name)
       blob_reader = blobstore.BlobReader(blob_key)
@@ -423,26 +431,38 @@ class ExtractOutlinksPipeline(base_handler.PipelineBase):
           content = None
           if len(fetched_datums)>0:
             content = fetched_datums[0].content_text
+            if not content:
+              content = fetched_datums[0].content_binary
 
+            mime_type = fetched_datums[0].content_type
           if content is not None:
-            urls = re.findall(r'href=[\'"]?([^\'" >]+)', content)
+            parsed_obj = None
+            try:
+              parsed_obj = util.handler_for_name(parser_params[mime_type])(content)
+            except Exception as e:
+              logging.warning("Can not handle for %s:%s"%(mime_type, e.message))
+              continue
+
             crawl_depth = entity.crawl_depth
             crawl_depth += 1
-            for url in urls:
-              parsed_uri = urlparse(url)
-              # To use url as a key, requires to string size is lower to 500 characters.
-              if len(parsed_uri) > 500:
-                continue
-
-              if parsed_uri.scheme == "http" or parsed_uri.scheme == "https":
-                #If parsed outlink url has existing in datum, not put.
-                temp_crawldatums = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, url))
-                if len(temp_crawldatums) == 0:
-                  crawl_db_datum = CrawlDbDatum(
-                      parent=ndb.Key(CrawlDbDatum, url),
-                      url=url,
-                      last_status=UNFETCHED,
-                      crawl_depth=crawl_depth)
-                  crawl_db_datum.put()
+            try:
+              for url in parsed_obj:
+                parsed_uri = urlparse(url)
+                # To use url as a key, requires to string size is lower to 500 characters.
+                if len(parsed_uri) > 500:
+                  continue
+  
+                if parsed_uri.scheme == "http" or parsed_uri.scheme == "https":
+                  #If parsed outlink url has existing in datum, not put.
+                  temp_crawldatums = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, url))
+                  if len(temp_crawldatums) == 0:
+                    crawl_db_datum = CrawlDbDatum(
+                        parent=ndb.Key(CrawlDbDatum, url),
+                        url=url,
+                        last_status=UNFETCHED,
+                        crawl_depth=crawl_depth)
+                    crawl_db_datum.put()
+            except Exception as e:
+              logging.warning("Parsed object is not outlinks iter:"+e.message)
 
         url = blob_reader.readline()

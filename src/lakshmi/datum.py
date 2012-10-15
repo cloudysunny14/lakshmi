@@ -26,17 +26,19 @@ class CrawlDbDatum(ndb.Model):
     last_updated: last time of update
     last_status: the status of last fetch
     crawl_depth: the crawl depth"""
-    
-  url = ndb.StringProperty()
+  #reason of indexed=False is saving the datastore write operation.
+  url = ndb.StringProperty(indexed=False)
   extract_domain_url = ndb.StringProperty()
   last_fetched = ndb.DateTimeProperty(verbose_name=None,
                              auto_now=True,
-                             auto_now_add=True)
+                             auto_now_add=True,
+                             indexed=False)
   last_updated = ndb.DateTimeProperty(verbose_name=None,
                              auto_now=True,
-                             auto_now_add=True)
+                             auto_now_add=True,
+                             indexed=False)
   last_status = ndb.IntegerProperty()
-  crawl_depth = ndb.IntegerProperty()
+  crawl_depth = ndb.IntegerProperty(indexed=False)
   
   @classmethod
   def kind(cls):
@@ -61,15 +63,15 @@ class FetchedDatum(ndb.Model):
     response_rate: the response rate.
     http_headers: the responsed HTTP header.
   """
-  url = ndb.StringProperty()
-  fetched_url = ndb.StringProperty()
-  fetch_time = ndb.FloatProperty()
-  content_text = ndb.TextProperty()
-  content_binary = ndb.BlobProperty()
-  content_type = ndb.StringProperty()
-  content_size = ndb.IntegerProperty()
-  response_rate = ndb.IntegerProperty()
-  http_headers = ndb.TextProperty()
+  url = ndb.StringProperty(indexed=False)
+  fetched_url = ndb.StringProperty(indexed=False)
+  fetch_time = ndb.FloatProperty(indexed=False)
+  content_text = ndb.TextProperty(indexed=False)
+  content_binary = ndb.BlobProperty(indexed=False)
+  content_type = ndb.StringProperty(indexed=False)
+  content_size = ndb.IntegerProperty(indexed=False)
+  response_rate = ndb.IntegerProperty(indexed=False)
+  http_headers = ndb.TextProperty(indexed=False)
 
   @classmethod
   def kind(cls):

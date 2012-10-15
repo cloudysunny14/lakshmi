@@ -19,6 +19,7 @@ import logging
 import httplib
 import StringIO
 import gzip
+import re
 
 from google.appengine.api import urlfetch
 from lakshmi import errors
@@ -231,10 +232,13 @@ class SimpleHttpFetcher(FetcherBase):
       if truncated:
         raise errors.AbortedFetchError("%s Truncated image" % fetch_url)
       else:
-        content_binary = content
+        if re.search("\+xml", mime_type):
+          content_text = content
+        else:
+          content_binary = content
     else:
       content_text = content
-    
+
     return {"url": fetch_url,
             "fetched_url": fetched_url,
             "time": self._time(),
