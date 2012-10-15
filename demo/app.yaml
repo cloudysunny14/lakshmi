@@ -19,4 +19,4 @@ handlers:
   script: mapreduce/main.py
 
 - url: /.*
-  script: fetcher_main.py
+  script: main.py
