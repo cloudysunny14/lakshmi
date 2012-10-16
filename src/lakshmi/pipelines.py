@@ -262,6 +262,7 @@ def _makeFetchSetBufferMap(binary_record):
       can_fetch = rp.can_fetch(user_agent, url)
     except Exception as e:
       logging.warning("RobotFileParser raises exception:" + e.message)
+      url = ""
       can_fetch = False
 
     yield (url, can_fetch)
