@@ -13,5 +13,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Cooperate with Google Cloud Platform for mining fetched data.
+
+Uses the App Engine MapReduce mapper pipeline to read entities
+out of the App Engine Datastore, write processed entities into
+Cloud Storage in CSV format, then starts another pipeline that
+creates a other service's ingestion job.
+"""
 
 
