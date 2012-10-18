@@ -75,6 +75,7 @@ class _ExactDomainMapreducePipeline(base_handler.PipelineBase):
     params: parameters for DatastoreInputReader,
       that params use to CrawlDbDatum.
     shard_count: shard count for mapreduce.
+
   Returns:
     file_names: output path of exact domains,
       that will generate to urls csv.
@@ -180,13 +181,13 @@ class _RobotsLineInputReader(input_readers.BlobstoreLineInputReader):
 
 def _robots_fetch_map(data):
   """Map function of fetch robots.txt from page.
-  
   Fetch robots.txt from Web Pages in specified url,
   Fetched result content will store to Blobstore,
   which will parse and set the score for urls.
   
   Args:
     data: key value data, that key is position, value is url.
+
   Returns:
     url: extract domain url.
     content: content of fetched from url's robots.txt
@@ -212,6 +213,7 @@ class _RobotsFetchPipeline(base_handler.PipelineBase):
     job_name: job name as string.
     blob_keys: files which urls for fetch robots.txt are stored. 
     shards: number of shards.
+
   Returns:
     file_names: output path of fetch results.
   """
@@ -272,7 +274,8 @@ class _FetchSetsBufferPipeline(base_handler.PipelineBase):
   
   Args:
     job_name: job name as string.
-    file_names: file names of fetch result of robots.txt. 
+    file_names: file names of fetch result of robots.txt.
+
   Returns:
     file_names: output path of fetch results.
   """
@@ -295,9 +298,11 @@ def _str2bool(v):
 def _fetchMap(binary_record):
   """Map function of create fetch result,
   that create FetchResulDatum entity, will be store to datastore. 
+
   Arg:
     binary_record: key value data, that key is url to fetch,
       value is boolean value of can be fetch.
+
   Returns:
     url: to fetch url.
     fetch_result: the result of fetch.
@@ -356,6 +361,7 @@ class _FetchPipeline(base_handler.PipelineBase):
     job_name: job name as string.
     file_names: file names of fetch result count and status 
     shards: number of shards.
+
   Returns:
     file_names: output path of fetch results.
   """
@@ -383,6 +389,7 @@ class FetcherPipeline(base_handler.PipelineBase):
       The parser is user defined function for each mime-types, which returns 
       outlinks url list.
     shards: number of shard for fetch job.
+
   Returns:
     The list of filenames as string. Resulting files contain serialized
     file_service_pb.KeyValues protocol messages with all values collated
