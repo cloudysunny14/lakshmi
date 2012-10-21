@@ -192,7 +192,6 @@ def _robots_fetch_map(data):
     url: extract domain url.
     content: content of fetched from url's robots.txt
   """
-  fetcher_policy_yaml = configuration.FetcherPolicyYaml.create_default_policy()
   fetcher = fetchers.SimpleHttpFetcher(1, fetcher_policy_yaml.fetcher_policy)
   k, url = data
   logging.debug("data"+str(k)+":"+str(url))
@@ -205,7 +204,9 @@ def _robots_fetch_map(data):
     content = "User-agent: *\nAllow: /"
 
   yield (url, content)
-  
+
+fetcher_policy_yaml = configuration.FetcherPolicyYaml.create_default_policy()
+
 class _RobotsFetchPipeline(base_handler.PipelineBase):
   """Pipeline to execute RobotFetch jobs.
   
@@ -314,12 +315,16 @@ def _fetchMap(binary_record):
   result = UNFETCHED
   fetched_url = ""
   #Fetch to CrawlDbDatum
-  crawl_db_key = ndb.Key(CrawlDbDatum, url)
-  crawl_db_datums = CrawlDbDatum.fetch_crawl_db(crawl_db_key)
-  crawl_db_datum = crawl_db_datums[0]
+  try:
+    crawl_db_key = ndb.Key(CrawlDbDatum, url)
+    crawl_db_datums = CrawlDbDatum.fetch_crawl_db(crawl_db_key)
+    crawl_db_datum = crawl_db_datums[0]
+  except Exception as e:
+    logging.warning("Failed create key, caused by invalid url:" + url + ":" + e.message)
+    could_fetch = False
+
   if could_fetch:
-    #start fetch
-    fetcher_policy_yaml = configuration.FetcherPolicyYaml.create_default_policy()
+    #start fetch    
     fetcher = fetchers.SimpleHttpFetcher(1, fetcher_policy_yaml.fetcher_policy)
     try:
       fetch_result = fetcher.get(url)
@@ -347,10 +352,11 @@ def _fetchMap(binary_record):
   else:
     result = SKIPPED
   
-  #update the crawlDbDatum's status
-  crawl_db_datum.last_updated = datetime.datetime.now()
-  crawl_db_datum.last_status = result
-  crawl_db_datum.put()
+  if crawl_db_datum is not None:
+    #update the crawlDbDatum's status
+    crawl_db_datum.last_updated = datetime.datetime.now()
+    crawl_db_datum.last_status = result
+    crawl_db_datum.put()
   
   yield fetched_url
 
@@ -388,6 +394,7 @@ class FetcherPipeline(base_handler.PipelineBase):
     parser_params: Params for extract outlink parser for each mime-types,
       The parser is user defined function for each mime-types, which returns 
       outlinks url list.
+    need_extract: If not need extract outlinks from html, set False.
     shards: number of shard for fetch job.
 
   Returns:
@@ -399,14 +406,16 @@ class FetcherPipeline(base_handler.PipelineBase):
           job_name,
           params,
           parser_params,
-          shards):
+          need_extract=True,
+          shards=8):
     extract_domain_files = yield _ExactDomainMapreducePipeline(job_name,
         params=params,
         shard_count=shards)
     robots_files = yield _RobotsFetchPipeline(job_name, extract_domain_files, shards)
     fetch_set_buffer_files = yield _FetchSetsBufferPipeline(job_name, robots_files)
     result_files = yield _FetchPipeline(job_name, fetch_set_buffer_files, shards)
-    yield ExtractOutlinksPipeline(result_files, parser_params)
+    if need_extract:
+      yield ExtractOutlinksPipeline(result_files, parser_params)
     temp_files = [extract_domain_files, robots_files, fetch_set_buffer_files, result_files]
     with pipeline.After(result_files):
       all_temp_files = yield pipeline_common.Extend(*temp_files)
@@ -474,3 +483,96 @@ class ExtractOutlinksPipeline(base_handler.PipelineBase):
               logging.warning("Parsed object is not outlinks iter:"+e.message)
 
         url = blob_reader.readline()
+
+from google.appengine.api import search
+
+score_config_yaml = configuration.ScoreConfigYaml.create_default_config()
+SCORE_INDEX_NAME = "score_index"
+
+def _page_scorering_map(crawl_db_datum):
+  """Page scorering map function."""
+  data = ndb.Model.to_dict(crawl_db_datum)
+  url = data.get("url", None)
+  key = ndb.Key(CrawlDbDatum, url)
+  fetched_datums = FetchedDatum.fetch_fetched_datum(key)
+  #default setting to status is FETCHED
+  crawl_db_datum.last_status = FETCHED
+  score = 0.0
+  if len(fetched_datums) > 0:
+    fetched_datum = fetched_datums[0]
+    content = fetched_datum.content_text
+    doc_index = search.Index(name=SCORE_INDEX_NAME)
+    #Remove all index
+    while True:
+      # Get a list of documents populating only the doc_id field and extract the ids.
+      document_ids = [document.doc_id
+          for document in doc_index.list_documents(ids_only=True)]
+      if not document_ids:
+        break
+      # Remove the documents for the given ids from the Index.
+      doc_index.remove(document_ids)
+    
+    doc = search.Document(
+        fields=[search.TextField(name="url", value=url),
+            search.HtmlField(name="content", value=content)])
+    try:
+      index = search.Index(name=SCORE_INDEX_NAME)
+      index.add(doc)
+    except search.Error:
+      logging.exception('Add failed')
+    
+    sort = search.SortOptions(match_scorer=search.MatchScorer(),
+          expressions=[search.SortExpression(
+          expression='_score',
+          default_value=0.0)])
+
+    # Set query options
+    options = search.QueryOptions(
+        cursor=search.Cursor(),
+        sort_options=sort,
+        returned_fields=['url'],
+        snippeted_fields=['content'])
+
+    query_str = score_config_yaml.score_config.score_query
+    adopt_score = score_config_yaml.score_config.adopt_score
+    query = search.Query(query_string=query_str, options=options) 
+    try:
+      results = search.Index(name=SCORE_INDEX_NAME).search(query)
+      for scored_document in results.results:
+        # process scored_document 
+        if len(scored_document.sort_scores)>0:
+          score = scored_document.sort_scores[0] 
+          if score >= float(adopt_score):
+            crawl_db_datum.last_status = UNFETCHED
+        crawl_db_datum.page_score = score
+    except search.Error:
+      logging.exception("Scorering failed:"+url)
+
+  crawl_db_datum.put()
+
+  yield(url+":"+str(score)+"\n")
+
+class PageScorePipeline(base_handler.PipelineBase):
+  """Pipeline to execute Fetch jobs.
+  
+  Args:
+    job_name: job name as string.
+    params: parameters for DatastoreInputReader, 
+      that params use to CrawlDbDatum. 
+    shards: number of shards.
+
+  Returns:
+    file_names: output path of score results.
+  """
+  def run(self,
+          job_name,
+          params,
+          scorer_spec=__name__+"._page_scorering_map",
+          shards=8):
+    yield mapreduce_pipeline.MapperPipeline(
+      job_name,
+      scorer_spec,
+      "mapreduce.input_readers.DatastoreInputReader",
+      output_writer_spec=output_writers.__name__ + ".BlobstoreOutputWriter" ,
+      params=params,
+      shards=shards)

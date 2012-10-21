@@ -29,11 +29,6 @@ FP_YAML_NAME = "fetcher_policy.yaml"
 # stored resource file path 
 FP_RESOURCE_PATH = "resource"
 
-# fetch_mode
-EFFICIENT = "efficient"
-COMPLETE = "complete"
-IMPOLITE = "impolite"
-
 # redirect_mode
 FOLLOW_ALL = "follow_all"
 FOLLOW_NONE = "follow_none"
@@ -244,5 +239,134 @@ class FetcherPolicyYaml(validation.Validated):
         params["size"] = param.size
         max_content_size_list.append(params)
       out["max_content_size"] = max_content_size_list
+
+    return out
+
+SC_RESOURCE_PATH="resource"
+SC_YAML_NAME="score_config.yaml"
+
+def find_score_config_yaml(conf_file=__file__):
+  """Traverse directory trees to find score_config.yaml file.
+
+  Begins with the location of configuration.py and then moves on to check the working
+  directory.
+
+  Args:
+    status_file: location of configuration.py, overridable for testing purposes.
+
+  Returns:
+    the path of score_config.yaml file or None if not found.
+  """
+  checked = set()
+  yaml = _find_score_config_yaml(os.path.dirname(conf_file), checked)
+  if not yaml:
+    yaml = _find_score_config_yaml(os.getcwd(), checked)
+  return yaml
+
+def _find_score_config_yaml(start, checked):
+  """Traverse the directory tree identified by start until a directory already
+  in checked is encountered or the path of score_config.yaml is found.
+
+  Checked is present both to make loop termination easy to reason about and so
+  that the same directories do not get rechecked.
+
+  Args:
+    start: the path to start in and work upward from
+    checked: the set of already examined directories
+
+  Returns:
+    the path of fetcher_policy.yaml file or None if not found.
+  """
+  dir = start
+  while dir not in checked:
+    checked.add(dir)
+    yaml_path = os.path.join(dir, SC_YAML_NAME)
+    if os.path.exists(yaml_path):
+      return yaml_path
+    dir = os.path.dirname(dir)
+  return None
+
+def parse_score_config_yaml(contents):
+  """Parses score_config.yaml file contents.
+
+  Args:
+    contents: score_config.yaml file contents.
+
+  Returns:
+    ScoreConfigYaml object with all the data from original file.
+
+  Raises:
+    errors.BadYamlError: when contents is not a valid score_config.yaml file.
+  """
+  try:
+    builder = yaml_object.ObjectBuilder(ScoreConfigYaml)
+    handler = yaml_builder.BuilderHandler(builder)
+    listener = yaml_listener.EventListener(handler)
+    listener.Parse(contents)
+
+    fp_info = handler.GetResults()
+  except (ValueError, yaml_errors.EventError), e:
+    raise errors.BadYamlError(e)
+
+  if len(fp_info) < 1:
+    raise errors.BadYamlError("No configs found in score_config.yaml")
+  if len(fp_info) > 1:
+    raise errors.MultipleDocumentsInFpYaml("Found %d YAML documents" %
+                                           len(fp_info))
+
+  jobs = fp_info[0]
+
+  return jobs
+
+class ScoreConfigInfo(validation.Validated):
+  """Configuration parameters for the score_config"""
+  ATTRIBUTES = {
+      "score_query": r".+",
+      "adopt_score": r"[0-9.]+"
+  }
+
+class ScoreConfigYaml(validation.Validated):
+  """Root class for score_config.yaml.
+
+  File format:
+
+  score_config:
+    topic_terms: Python, GoogleAppEngine
+    adopt_score: 0.5
+
+  Where
+    fetcher_policy: The page scorering configration root.
+    score_query: Specified some word of topics
+    adopt_socre: Lagger than this value,Adopt to next object for next fetchjob.
+  """
+
+  ATTRIBUTES = {
+      "score_config": validation.Optional(ScoreConfigInfo)
+  }
+  
+  @classmethod
+  def create_default_config(cls):
+    path = os.path.join(os.path.dirname(__file__), SC_RESOURCE_PATH, SC_YAML_NAME)
+    score_config_yaml = parse_score_config_yaml(open(path))
+    return score_config_yaml
+  
+  @staticmethod
+  def to_dict(score_config_yaml):
+    """Converts a ScoreConfigYaml file into a JSON-encodable dictionary.
+
+    For use in user-visible UI and internal methods for interfacing with
+    user code (like param validation). as a list
+
+    Args:
+      score_config_yaml: The python representation of the score_config.yaml document.
+
+    Returns:
+      A list of configuration dictionaries.
+    """
+    score_config = score_config_yaml.score_config
+    out = {
+      "score_query": score_config.score_query,
+      "adopt_score": score_config.adopt_score,
+    }
 
     return out

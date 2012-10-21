@@ -25,7 +25,9 @@ class CrawlDbDatum(ndb.Model):
     last_fetched: last time of fetch
     last_updated: last time of update
     last_status: the status of last fetch
-    crawl_depth: the crawl depth"""
+    crawl_depth: the crawl depth
+    page_score: the score of page
+  """
   #reason of indexed=False is saving the datastore write operation.
   url = ndb.StringProperty(indexed=False)
   extract_domain_url = ndb.StringProperty()
@@ -39,6 +41,7 @@ class CrawlDbDatum(ndb.Model):
                              indexed=False)
   last_status = ndb.IntegerProperty()
   crawl_depth = ndb.IntegerProperty(indexed=False)
+  page_score = ndb.FloatProperty()
   
   @classmethod
   def kind(cls):

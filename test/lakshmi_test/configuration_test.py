@@ -186,5 +186,100 @@ class FetcherPolicyYamlTest(unittest.TestCase):
             'request_timeout': "20"
       }, all_configs)
 
+class ScoreConfigYamlTest(unittest.TestCase):
+  """Testing fetcher_policy.yaml-related functionality."""
+  
+  def set_up_directory_tree(self, dir_tree_contents):
+    """Create directory tree from dict of path:contents entries."""
+    for full_path, contents in dir_tree_contents.iteritems():
+      dir_name = os.path.dirname(full_path)
+      if not os.path.isdir(dir_name):
+        os.makedirs(dir_name)
+      f = open(full_path, 'w')
+      f.write(contents)
+      f.close()
+
+  def setUp(self):
+    """Initialize temporary application variable."""
+    self.tempdir = tempfile.mkdtemp()
+
+  def tearDown(self):
+    """Remove temporary application directory."""
+    if self.tempdir:
+      shutil.rmtree(self.tempdir)
+
+  def testFindYamlFile(self):
+    """Test if mapreduce.yaml can be found with different app/library trees."""
+    test_conf = os.path.join(self.tempdir, "library_root", "lakshmi", "configuration.py")
+    test_score_config_yaml = os.path.join(self.tempdir, "application_root",
+                                       "score_config.yaml")
+    test_dict = {
+        test_conf: "test",
+        test_score_config_yaml: "test",
+    }
+    self.set_up_directory_tree(test_dict)
+    os.chdir(os.path.dirname(test_score_config_yaml))
+    yaml_loc = configuration.find_score_config_yaml(conf_file=test_conf)
+    self.assertEqual(("/private%s" % test_score_config_yaml), yaml_loc)
+
+  def testFindYamlFileSameTree(self):
+    """Test if fetcher_policy.yaml can be found with the same app/library tree."""
+    test_conf = os.path.join(self.tempdir, "library_root", "lakshmi", "configuration.py")
+    test_score_config_yaml = os.path.join(self.tempdir, "application_root",
+                                       "score_config.yaml")
+    test_dict = {
+        test_conf: "test",
+        test_score_config_yaml: "test",
+    }
+    self.set_up_directory_tree(test_dict)
+    os.chdir(os.path.dirname(test_score_config_yaml))
+    yaml_loc = configuration.find_score_config_yaml(conf_file=test_conf)
+    self.assertEqual(("/private%s" % test_score_config_yaml), yaml_loc)
+
+  def testParseEmptyFile(self):
+    """Parsing empty mapreduce.yaml file."""
+    self.assertRaises(errors.BadYamlError,
+                      configuration.parse_score_config_yaml,
+                      "")
+
+  def testParse(self):
+    """Parsing a single document in score_config.yaml."""
+    score_config_yaml = configuration.parse_score_config_yaml(
+        "score_config:\n"
+        "  score_query: Python,Google App Engine\n"
+        "  adopt_score: 0.5\n")
+
+    self.assertTrue(score_config_yaml)
+    self.assertTrue("Python,Google App Engine", score_config_yaml.score_config.score_query)
+    self.assertTrue("test@domain.com", score_config_yaml.score_config.adopt_score)
+
+  def testParseMissingRequiredAttrs(self):
+    """Test parsing with missing required attributes."""
+    self.assertRaises(errors.BadYamlError,
+                      configuration.parse_score_config_yaml,
+                      "score_config:\n"
+                      "  score_query: 0\n")
+
+  def testBadValues(self):
+    """Tests when some yaml values are of the wrong type."""
+    self.assertRaises(errors.BadYamlError,
+                      configuration.parse_fetcher_policy_yaml,
+                      "score_config:\n"
+                      "  score_query: 0\n"
+                      "  adopt_score: $$Invalid$$\n")
+
+  def testToDict(self):
+    """Tests encoding the SC document as JSON."""
+    sc_yaml = configuration.parse_score_config_yaml(
+        "score_config:\n"
+        "  score_query: Python,Google App Engine\n"
+        "  adopt_score: 0.5\n")
+    all_configs = configuration.ScoreConfigYaml.to_dict(sc_yaml)
+    self.assertEquals(
+      {
+            'score_query': "Python,Google App Engine",
+            'adopt_score': "0.5"
+      }, all_configs)
+
 if __name__ == "__main__":
   unittest.main()

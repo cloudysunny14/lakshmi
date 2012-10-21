@@ -16,6 +16,7 @@
 
 import unittest
 import logging
+import os
 
 from google.appengine.ext import ndb
 
@@ -46,6 +47,22 @@ def createMockCrawlDbDatum(domain_count, url_count, isExtracted):
             last_status=pipelines.UNFETCHED,
             crawl_depth=0)
         datum.put()
+
+def createMockFetchedDatum(url, html_text):
+  """Create FetchedDatum mock data."""
+  key = ndb.Key(CrawlDbDatum, url)
+  crawl_db_datum = CrawlDbDatum(
+      parent=key,
+      url=url,
+      last_status=pipelines.FETCHED,
+      crawl_depth=0)
+  crawl_db_datum.put()
+  fetched_datum = FetchedDatum(
+      parent=key,
+      url=url,
+      fetched_url=url,
+      content_text=html_text)
+  fetched_datum.put()
         
 class ExactDomainPilelineTest(testutil.HandlerTestBase):
   """Tests for ExactDomainPileline."""
@@ -122,7 +139,6 @@ class RobotFetcherPipelineTest(testutil.HandlerTestBase):
     self.setReturnValue(content=static_content,
                         headers={"Content-Length": len(static_content),
                                  "Content-Type": "text/html"})
-    print("blobKeys" + str(blob_keys))
     p = pipelines._RobotsFetchPipeline("RobotsFetchPipeline", blob_keys, 2)
     p.start()
     
@@ -285,6 +301,48 @@ class FetchPipelineTest(testutil.HandlerTestBase):
     fetched_datums = FetchedDatum.fetch_fetched_datum(entity.key)
     fetched_datum = fetched_datums[0]
     self.assertTrue(fetched_datum is not None)
+
+class PageScorePipelineTest(testutil.HandlerTestBase):
+  """Test for PageRankPipeline. """
+  def setUp(self):
+    testutil.HandlerTestBase.setUp(self)
+    pipeline.Pipeline._send_mail = self._send_mail
+    self.emails = []
+
+  def getResource(self, file_name):
+    """ to get contents from resource"""
+    path = os.path.join(os.path.dirname(__file__), "resource", file_name)
+    return open(path)
+
+  def _send_mail(self, sender, subject, body, html=None):
+    """Callback function for sending mail."""
+    self.emails.append((sender, subject, body, html))
+
+  def testSuccessfulRun(self):
+    """Test scored page by Search API"""
+    resource_neg = self.getResource("cloudysunny14.html")
+    static_content_neg = resource_neg.read()
+    createMockFetchedDatum("http://cloudysunny14.html", static_content_neg)
+    resource_pos = self.getResource("python_positive.html")
+    static_content_pos = resource_pos.read()
+    createMockFetchedDatum("http://python_positive.html", static_content_pos)
+    p = pipelines.PageScorePipeline("PageScorePipeline", 
+        params={
+          "entity_kind": "lakshmi.datum.CrawlDbDatum"
+        },
+        shards=2) 
+    p.start()
+    test_support.execute_until_empty(self.taskqueue)
+
+    entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, "http://cloudysunny14.html"))
+    for entity in entities:
+      print(entity.url+str(entity.page_score))
+      self.assertEquals(pipelines.FETCHED, entity.last_status)
+    
+    entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, "http://python_positive.html"))
+    for entity in entities:
+      print(entity.url+str(entity.page_score))
+      self.assertEquals(pipelines.UNFETCHED, entity.last_status)
 
 if __name__ == "__main__":
   unittest.main()

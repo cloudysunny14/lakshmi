@@ -81,10 +81,22 @@ class DeleteDatumHandler(webapp.RequestHandler):
       self.response.out.write(repr(e)+'\n')
       pass
 
+class ScoreHandler(webapp.RequestHandler):
+  def get(self):
+    pipeline = pipelines.PageScorePipeline("PageScorePipeline",
+        params={
+          "entity_kind": "lakshmi.datum.CrawlDbDatum"
+        },
+        shards=8)
+    pipeline.start()
+    path = pipeline.base_path + "/status?root=" + pipeline.pipeline_id
+    self.redirect(path)
+
 application = webapp.WSGIApplication(
                                      [("/start", FetchStart),
                                      ("/add_data", AddRootUrlsHandler),
-                                     ("/delete_all_data", DeleteDatumHandler)],
+                                     ("/delete_all_data", DeleteDatumHandler),
+                                     ("/score", ScoreHandler)],
                                      debug=True)
                                      
 def main():

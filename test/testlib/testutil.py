@@ -44,6 +44,7 @@ from google.appengine.api.blobstore import file_blob_storage
 from google.appengine.api.memcache import memcache_stub
 from google.appengine.api.taskqueue import taskqueue_stub
 from google.appengine.api import urlfetch_stub
+from google.appengine.api.search import simple_search_stub
 from lakshmi import configuration
 
 class URLFetchServiceMock(apiproxy_stub.APIProxyStub):
@@ -157,6 +158,8 @@ class HandlerTestBase(unittest.TestCase):
     self.blobstore_stub = blobstore_stub.BlobstoreServiceStub(blob_storage)
     self.file_service = self.createFileServiceStub(blob_storage)
     self._urlfetch_mock = urlfetch_mock
+    self.search_service = simple_search_stub.SearchServiceStub()
+    
     apiproxy_stub_map.apiproxy = apiproxy_stub_map.APIProxyStubMap()
     apiproxy_stub_map.apiproxy.RegisterStub("taskqueue", self.taskqueue)
     apiproxy_stub_map.apiproxy.RegisterStub("memcache", self.memcache)
@@ -164,6 +167,7 @@ class HandlerTestBase(unittest.TestCase):
     apiproxy_stub_map.apiproxy.RegisterStub("blobstore", self.blobstore_stub)
     apiproxy_stub_map.apiproxy.RegisterStub("file", self.file_service)
     apiproxy_stub_map.apiproxy.RegisterStub("urlfetch", self._urlfetch_mock)
+    apiproxy_stub_map.apiproxy.RegisterStub("search", self.search_service)
 
   def createFileServiceStub(self, blob_storage):
     return file_service_stub.FileServiceStub(blob_storage)
