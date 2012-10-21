@@ -1,0 +1,3 @@
+score_config:
+  topic_terms: Python,Google App Engine
+  adopt_score: 0.5
