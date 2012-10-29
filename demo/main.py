@@ -33,7 +33,7 @@ from lakshmi.datum import CrawlDbDatum
 
 ENTITY_KIND = "lakshmi.datum.CrawlDbDatum"
 #specified some urls
-ROOT_URLS = ["http://www.python.org/"]
+ROOT_URLS = ["http://cnn.com/", "http://cloudysunny14.blogspot.jp/"]
 
 
 class AddRootUrlsHandler(webapp.RequestHandler):
