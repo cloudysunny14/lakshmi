@@ -32,8 +32,6 @@ class CrawlDbDatum(ndb.Model):
   url = ndb.StringProperty(indexed=False)
   extract_domain_url = ndb.StringProperty()
   last_fetched = ndb.DateTimeProperty(verbose_name=None,
-                             auto_now=True,
-                             auto_now_add=True,
                              indexed=False)
   last_updated = ndb.DateTimeProperty(verbose_name=None,
                              auto_now=True,

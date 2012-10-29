@@ -240,7 +240,6 @@ class FetchSetsBufferPipelineTest(testutil.HandlerTestBase):
 
     reader = input_readers.RecordsReader(file_paths, 0)
     for binary_record in reader:
-      logging.warning("key")
       proto = file_service_pb.KeyValue()
       proto.ParseFromString(binary_record)
       key = proto.key()
@@ -301,6 +300,57 @@ class FetchPipelineTest(testutil.HandlerTestBase):
     fetched_datums = FetchedDatum.fetch_fetched_datum(entity.key)
     fetched_datum = fetched_datums[0]
     self.assertTrue(fetched_datum is not None)
+
+class PageIndexPipelineTest(testutil.HandlerTestBase):
+  """Test for PageIndexPipeline."""
+  def setUp(self):
+    testutil.HandlerTestBase.setUp(self)
+    pipeline.Pipeline._send_mail = self._send_mail
+    self.emails = []
+
+  def getResource(self, file_name):
+    """ to get contents from resource"""
+    path = os.path.join(os.path.dirname(__file__), "resource", file_name)
+    return open(path)
+
+  def _send_mail(self, sender, subject, body, html=None):
+    """Callback function for sending mail."""
+    self.emails.append((sender, subject, body, html))
+
+  def testSuccessfulRun(self):
+    """Test scored page by Search API"""
+    resource_neg = self.getResource("cloudysunny14.html")
+    static_content_neg = resource_neg.read()
+    createMockFetchedDatum("http://cloudysunny14.html", static_content_neg)
+    resource_pos = self.getResource("python_positive.html")
+    static_content_pos = resource_pos.read()
+    createMockFetchedDatum("http://python_positive.html", static_content_pos)
+    p = pipelines._PageIndexPipeline("PageIndexPipeline", 
+        params={
+          "entity_kind": "lakshmi.datum.CrawlDbDatum"
+        },
+        shards=2) 
+    p.start()
+    test_support.execute_until_empty(self.taskqueue)
+    finished_map = pipelines._PageIndexPipeline.from_id(p.pipeline_id)
+    
+    # Can open files
+    file_paths = finished_map.outputs.default.value
+    self.assertTrue(len(file_paths) > 0)
+    self.assertTrue(file_paths[0].startswith("/blobstore/"))
+
+    reader = input_readers.RecordsReader(file_paths, 0)
+    for binary_record in reader:
+      proto = file_service_pb.KeyValue()
+      proto.ParseFromString(binary_record)
+      key = proto.key()
+      value = proto.value()
+      if key == "http://cloudysunny14.html":
+        self.assertEquals(pipelines.INDEX_NAME, value[:len(pipelines.INDEX_NAME)])
+      elif key == "http://python_positive.html" :
+        self.assertEquals(pipelines.INDEX_NAME, value[:len(pipelines.INDEX_NAME)])
+      else:
+        self.assertTrue(False)
 
 class PageScorePipelineTest(testutil.HandlerTestBase):
   """Test for PageRankPipeline. """

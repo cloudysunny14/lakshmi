@@ -21,17 +21,19 @@ __author__ = """cloudysunny14@gmail.com (Kiyonari Harigae)"""
 
 import time
 import re
-
 from google.appengine.ext.webapp.util import run_wsgi_app
 from google.appengine.ext import ndb
 from google.appengine.ext import webapp
+from google.appengine.api import search
+
+from mapreduce import base_handler
 
 from lakshmi import pipelines
 from lakshmi.datum import CrawlDbDatum
 
 ENTITY_KIND = "lakshmi.datum.CrawlDbDatum"
 #specified some urls
-ROOT_URLS = ["http://cnn.com/", "http://cloudysunny14.blogspot.jp/"]
+ROOT_URLS = ["http://www.python.org/"]
 
 
 class AddRootUrlsHandler(webapp.RequestHandler):
@@ -60,7 +62,10 @@ class FetchStart(webapp.RequestHandler):
           "entity_kind": ENTITY_KIND
         },
         parser_params={
-          "text/html": "main._htmlOutlinkParser"
+          "text/html": "main._htmlOutlinkParser",
+          "application/rss+xml": "main._htmlOutlinkParser",
+          "application/atom+xml": "main._htmlOutlinkParser",
+          "text/xml": "main._htmlOutlinkParser"
         },
         shards=8)
     pipeline.start()
@@ -81,22 +86,55 @@ class DeleteDatumHandler(webapp.RequestHandler):
       self.response.out.write(repr(e)+'\n')
       pass
 
-class ScoreHandler(webapp.RequestHandler):
-  def get(self):
-    pipeline = pipelines.PageScorePipeline("PageScorePipeline",
+class ScorePipeline(base_handler.PipelineBase):
+  def run(self, entity_type):
+    output = yield pipelines.PageScorePipeline("PageScorePipeline",
         params={
-          "entity_kind": "lakshmi.datum.CrawlDbDatum"
+          "entity_kind": entity_type
         },
         shards=8)
+    yield RemoveIndex(output)
+    
+class RemoveIndex(base_handler.PipelineBase):
+  def run(self, output):
+    #Remove search index
+    for index in search.list_indexes(fetch_schema=True):
+      doc_index = search.Index(name=index.name)
+
+      while True:
+        # Get a list of documents populating only the doc_id field and extract the ids.
+        document_ids = [document.doc_id for document in doc_index.list_documents(ids_only=True)]
+        if not document_ids:
+          break
+        # Remove the documents for the given ids from the Index.
+        doc_index.remove(document_ids)
+    
+class ScoreHandler(webapp.RequestHandler):
+  def get(self):
+    pipeline = ScorePipeline(ENTITY_KIND)
     pipeline.start()
     path = pipeline.base_path + "/status?root=" + pipeline.pipeline_id
     self.redirect(path)
 
+class ReFetch(webapp.RequestHandler):
+  def get(self):
+    pipeline = pipelines.FetcherPipeline("FetcherPipeline",
+        params={
+          "entity_kind": ENTITY_KIND
+        },
+        parser_params=None,
+        need_extract=False,
+        shards=8)
+    pipeline.start()
+    path = pipeline.base_path + "/status?root=" + pipeline.pipeline_id
+    self.redirect(path)
+    
 application = webapp.WSGIApplication(
                                      [("/start", FetchStart),
                                      ("/add_data", AddRootUrlsHandler),
                                      ("/delete_all_data", DeleteDatumHandler),
-                                     ("/score", ScoreHandler)],
+                                     ("/score", ScoreHandler),
+                                     ("/refetch", ReFetch)],
                                      debug=True)
                                      
 def main():

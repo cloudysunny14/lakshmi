@@ -485,75 +485,159 @@ class ExtractOutlinksPipeline(base_handler.PipelineBase):
         url = blob_reader.readline()
 
 from google.appengine.api import search
+from google.appengine.api import memcache
 
 score_config_yaml = configuration.ScoreConfigYaml.create_default_config()
-SCORE_INDEX_NAME = "score_index"
+INDEX_NAME = "lakshmi_index"
+MEMCACHE_KEY = "lakshmi_index_num_key"
+# Number of index. 
+INDEX_NUM = 8
 
-def _page_scorering_map(crawl_db_datum):
-  """Page scorering map function."""
+def _get_index_num():
+  """ Get the number for index name via memcache increment.
+  """
+  return memcache.incr(MEMCACHE_KEY)
+
+def _page_index_map(crawl_db_datum):
+  """ Adding index map function.
+  Create the document and adding index to
+  make the data it describes searchable.
+  """
   data = ndb.Model.to_dict(crawl_db_datum)
   url = data.get("url", None)
   key = ndb.Key(CrawlDbDatum, url)
   fetched_datums = FetchedDatum.fetch_fetched_datum(key)
   #default setting to status is FETCHED
   crawl_db_datum.last_status = FETCHED
-  score = 0.0
-  if len(fetched_datums) > 0:
+  url_str = ""
+  try:
+    url_str = str(url)
+  except Exception as e:
+    logging.warning("Can't index this url:"+e.message)
+
+  index_name = INDEX_NAME+"_"+str(_get_index_num()%INDEX_NUM)
+  if len(fetched_datums) > 0 and len(url_str) > 0:
     fetched_datum = fetched_datums[0]
     content = fetched_datum.content_text
-    doc_index = search.Index(name=SCORE_INDEX_NAME)
-    #Remove all index
-    while True:
-      # Get a list of documents populating only the doc_id field and extract the ids.
-      document_ids = [document.doc_id
-          for document in doc_index.list_documents(ids_only=True)]
-      if not document_ids:
-        break
-      # Remove the documents for the given ids from the Index.
-      doc_index.remove(document_ids)
     
     doc = search.Document(
-        fields=[search.TextField(name="url", value=url),
+        fields=[search.TextField(name="url", value=url_str),
             search.HtmlField(name="content", value=content)])
     try:
-      index = search.Index(name=SCORE_INDEX_NAME)
+      index = search.Index(name=index_name)
       index.add(doc)
     except search.Error:
-      logging.exception('Add failed')
-    
-    sort = search.SortOptions(match_scorer=search.MatchScorer(),
-          expressions=[search.SortExpression(
-          expression='_score',
-          default_value=0.0)])
+      logging.warning('Add failed:'+url_str)
 
+  yield (url_str, index_name)
+
+class _PageIndexPipeline(base_handler.PipelineBase):
+  """ Pipeline to execute page index jobs.
+  Search API uses the Document object describing a
+  document fields.
+  The documents are adding to index for make the data it
+  describes searchable.
+  
+  Args:
+    job_name: job name as string.
+    params: parameters for DatastoreInputReader, 
+      that params use to CrawlDbDatum.
+    index_num: number of index
+    shards: number of shards.
+
+  Returns:
+    file_names: output path of score results.
+  """
+  def run(self,
+          job_name,
+          params,
+          shards=8):
+    memcache.set(key=MEMCACHE_KEY, value=0)
+    yield mapreduce_pipeline.MapperPipeline(
+      job_name,
+      __name__+"._page_index_map",
+      "mapreduce.input_readers.DatastoreInputReader",
+      output_writer_spec=output_writers.__name__ + ".KeyValueBlobstoreOutputWriter" ,
+      params=params,
+      shards=shards)
+
+def _page_scoring_map(binary_record):
+  """ Page scorering map function.
+    Scorering by SearchAPI.
+    Search API create index to each contents.
+    You should remove all indexes after job.
+  """
+  proto = file_service_pb.KeyValue()
+  proto.ParseFromString(binary_record)
+  url = proto.key()
+  index_name = proto.value()
+  crawl_db_key = ndb.Key(CrawlDbDatum, url)
+  crawl_db_datums = []
+  try:
+    crawl_db_datums = CrawlDbDatum.fetch_crawl_db(crawl_db_key)
+  except Exception as e:
+    logging.warning("Fetch error occurs:"+e.message)
+
+  score = 0.0
+  if len(crawl_db_datums)>0:
+    crawl_db_datum = crawl_db_datums[0]
+    crawl_db_datum.last_status = FETCHED  
+    sort = search.SortOptions(match_scorer=search.MatchScorer(),
+        expressions=[search.SortExpression(
+        expression='_score',
+        default_value=0.0)])
     # Set query options
     options = search.QueryOptions(
         cursor=search.Cursor(),
         sort_options=sort,
         returned_fields=['url'],
         snippeted_fields=['content'])
-
     query_str = score_config_yaml.score_config.score_query
     adopt_score = score_config_yaml.score_config.adopt_score
-    query = search.Query(query_string=query_str, options=options) 
+    query = search.Query(query_string=query_str, options=options)
     try:
-      results = search.Index(name=SCORE_INDEX_NAME).search(query)
+      results = search.Index(name=index_name).search(query)
       for scored_document in results.results:
-        # process scored_document 
-        if len(scored_document.sort_scores)>0:
+        # process scored_document
+        url_field = scored_document.fields[0]
+        if url_field.value == url and len(scored_document.sort_scores)>0:
           score = scored_document.sort_scores[0] 
           if score >= float(adopt_score):
-            crawl_db_datum.last_status = UNFETCHED
-        crawl_db_datum.page_score = score
+            crawl_db_datum.last_status = UNFETCHED      
     except search.Error:
-      logging.exception("Scorering failed:"+url)
+      logging.warning("Scorering failed:"+url)
 
-  crawl_db_datum.put()
+    crawl_db_datum.page_score = score
+    crawl_db_datum.put()
 
   yield(url+":"+str(score)+"\n")
 
+class _PageScorePipeline(base_handler.PipelineBase):
+  """ Pipeline to execute page score jobs.
+
+  Args:
+    job_name: job name as string.
+    file_names: FileNames of KeyValue record that 
+      key is url, value is index name.
+
+  Returns:
+    file_names: output path of score results.
+  """
+  def run(self,
+          job_name,
+          file_names):
+    yield mapreduce_pipeline.MapperPipeline(
+      job_name,
+      __name__ + "._page_scoring_map",
+      "mapreduce.input_readers.RecordsReader",
+      output_writer_spec=output_writers.__name__ + ".BlobstoreOutputWriter" ,
+      params={
+        "files": file_names,
+      },
+      shards=len(file_names))
+
 class PageScorePipeline(base_handler.PipelineBase):
-  """Pipeline to execute Fetch jobs.
+  """ Pipeline to execute Fetch jobs.
   
   Args:
     job_name: job name as string.
@@ -567,12 +651,12 @@ class PageScorePipeline(base_handler.PipelineBase):
   def run(self,
           job_name,
           params,
-          scorer_spec=__name__+"._page_scorering_map",
           shards=8):
-    yield mapreduce_pipeline.MapperPipeline(
-      job_name,
-      scorer_spec,
-      "mapreduce.input_readers.DatastoreInputReader",
-      output_writer_spec=output_writers.__name__ + ".BlobstoreOutputWriter" ,
-      params=params,
-      shards=shards)
+    indexed_files = yield _PageIndexPipeline(job_name, 
+        params=params,
+        shards=shards)
+    result_files = yield _PageScorePipeline(job_name, indexed_files)
+    temp_files = [indexed_files]
+    with pipeline.After(result_files):
+      all_temp_files = yield pipeline_common.Extend(*temp_files)
+      yield mapper_pipeline._CleanupPipeline(all_temp_files)
