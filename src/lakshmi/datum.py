@@ -29,7 +29,7 @@ class CrawlDbDatum(ndb.Model):
     page_score: the score of page
   """
   #reason of indexed=False is saving the datastore write operation.
-  url = ndb.StringProperty(indexed=False)
+  url = ndb.StringProperty()
   extract_domain_url = ndb.StringProperty()
   last_fetched = ndb.DateTimeProperty(verbose_name=None,
                              indexed=False)
@@ -48,6 +48,10 @@ class CrawlDbDatum(ndb.Model):
   @classmethod
   def fetch_crawl_db(cls, ancestor_key):
     return cls.query(ancestor=ancestor_key).fetch()
+
+  @classmethod
+  def fetch_crawl_db_from_url(cls, url):
+    return cls.query(CrawlDbDatum.url==url).fetch()
   
 class FetchedDatum(ndb.Model):
   """Hold the fetched result.

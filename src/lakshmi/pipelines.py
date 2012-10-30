@@ -41,7 +41,7 @@ from lakshmi.datum import CrawlDbDatum
 from lakshmi.datum import FetchedDatum
 
 #Define Fetch Status
-UNFETCHED, FETCHED, FAILED, SKIPPED = range(4) 
+UNFETCHED, FETCHED, FAILED, SKIPPED, SCORED_PAGE_LINK = range(5) 
 
 def getDomain(url):
   parsed_uri = urlparse(url)
@@ -59,7 +59,7 @@ def _extact_domain_map(entity_type):
   data = ndb.Model.to_dict(entity_type)
   extract_domain = ""
   fetch_status = data.get("last_status", 2) 
-  if fetch_status == UNFETCHED:
+  if fetch_status == UNFETCHED or fetch_status == SCORED_PAGE_LINK:
     url = data.get("url")
     extract_domain = getDomain(url)
     entity_type.extract_domain_url = extract_domain
@@ -323,10 +323,10 @@ def _fetchMap(binary_record):
   could_fetch = _str2bool(proto.value())
   result = UNFETCHED
   fetched_url = ""
+  crawl_db_datums = None
   #Fetch to CrawlDbDatum
   try:
-    crawl_db_key = ndb.Key(CrawlDbDatum, url)
-    crawl_db_datums = CrawlDbDatum.fetch_crawl_db(crawl_db_key)
+    crawl_db_datums = CrawlDbDatum.fetch_crawl_db_from_url(url)
     crawl_db_datum = crawl_db_datums[0]
   except Exception as e:
     logging.warning("Failed create key, caused by invalid url:" + url + ":" + e.message)
@@ -359,7 +359,7 @@ def _fetchMap(binary_record):
       logging.warning("Fetch Error Occurs:" + e.message)
       result = FAILED
   else:
-    result = SKIPPED
+    result = FAILED
   
   if crawl_db_datum is not None:
     #update the crawlDbDatum's status
@@ -452,7 +452,7 @@ class ExtractOutlinksPipeline(base_handler.PipelineBase):
       blob_reader = blobstore.BlobReader(blob_key)
       url = blob_reader.readline()
       while url:
-        entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, url.rstrip("\n")))
+        entities = CrawlDbDatum.fetch_crawl_db_from_url(url.rstrip("\n"))
         for entity in entities:
           fetched_datums = FetchedDatum.fetch_fetched_datum(entity.key)
           content = None
@@ -473,19 +473,19 @@ class ExtractOutlinksPipeline(base_handler.PipelineBase):
             crawl_depth = entity.crawl_depth
             crawl_depth += 1
             try:
-              for url in parsed_obj:
-                parsed_uri = urlparse(url)
+              for extract_url in parsed_obj:
+                parsed_uri = urlparse(extract_url)
                 # To use url as a key, requires to string size is lower to 500 characters.
                 if len(parsed_uri) > 500:
                   continue
   
                 if parsed_uri.scheme == "http" or parsed_uri.scheme == "https":
                   #If parsed outlink url has existing in datum, not put.
-                  temp_crawldatums = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, url))
+                  temp_crawldatums = CrawlDbDatum.fetch_crawl_db_from_url(extract_url)
                   if len(temp_crawldatums) == 0:
                     crawl_db_datum = CrawlDbDatum(
-                        parent=ndb.Key(CrawlDbDatum, url),
-                        url=url,
+                        parent=ndb.Key(CrawlDbDatum, url.rstrip("\n")),
+                        url=extract_url,
                         last_status=UNFETCHED,
                         crawl_depth=crawl_depth)
                     crawl_db_datum.put()
@@ -524,16 +524,13 @@ def _page_index_map(crawl_db_datum):
   """
   data = ndb.Model.to_dict(crawl_db_datum)
   url = data.get("url", None)
-  key = ndb.Key(CrawlDbDatum, url)
-  fetched_datums = FetchedDatum.fetch_fetched_datum(key)
-  #default setting to status is FETCHED
-  crawl_db_datum.last_status = FETCHED
   url_str = ""
   try:
     url_str = str(url)
   except Exception as e:
     logging.warning("Can't index this url:"+e.message)
 
+  fetched_datums = FetchedDatum.fetch_fetched_datum(crawl_db_datum.key)
   index_name = INDEX_NAME+"_"+str(_get_index_num()%INDEX_NUM)
   if len(fetched_datums) > 0 and len(url_str) > 0:
     fetched_datum = fetched_datums[0]
@@ -598,17 +595,21 @@ def _page_scoring_map(binary_record):
   proto.ParseFromString(binary_record)
   url = proto.key()
   index_name = proto.value()
-  crawl_db_key = ndb.Key(CrawlDbDatum, url)
   crawl_db_datums = []
   try:
-    crawl_db_datums = CrawlDbDatum.fetch_crawl_db(crawl_db_key)
+    crawl_db_datums = CrawlDbDatum.fetch_crawl_db_from_url(url)
   except Exception as e:
-    logging.warning("Fetch error occurs:"+e.message)
+    logging.warning("Extract crawldb from datastore error occurs:"+e.message)
 
   score = 0.0
   if len(crawl_db_datums)>0:
     crawl_db_datum = crawl_db_datums[0]
-    crawl_db_datum.last_status = FETCHED  
+    last_status = crawl_db_datum.last_status
+    # Update the status of the status SKIPPED,
+    # if the url's parent page is not preferenced page.
+    if last_status != SCORED_PAGE_LINK and last_status != FETCHED:
+      crawl_db_datum.last_status = SKIPPED
+
     sort = search.SortOptions(match_scorer=search.MatchScorer(),
         expressions=[search.SortExpression(
         expression='_score',
@@ -630,10 +631,16 @@ def _page_scoring_map(binary_record):
         if url_field.value == url and len(scored_document.sort_scores)>0:
           score = scored_document.sort_scores[0] 
           if score >= float(adopt_score):
-            crawl_db_datum.last_status = UNFETCHED      
+            #Update the status of the link, that extracted from the scored page.
+            entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, url))
+            for entity in entities:
+              if entity.last_status != FETCHED:
+                entity.last_status = SCORED_PAGE_LINK
+                entity.put()
     except search.Error:
       logging.warning("Scorering failed:"+url)
-
+    
+    # Update status. 
     crawl_db_datum.page_score = score
     crawl_db_datum.put()
 

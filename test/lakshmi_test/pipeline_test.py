@@ -48,21 +48,32 @@ def createMockCrawlDbDatum(domain_count, url_count, isExtracted):
             crawl_depth=0)
         datum.put()
 
-def createMockFetchedDatum(url, html_text):
+def createMockFetchedDatum(url, html_text, status):
   """Create FetchedDatum mock data."""
   key = ndb.Key(CrawlDbDatum, url)
   crawl_db_datum = CrawlDbDatum(
       parent=key,
       url=url,
-      last_status=pipelines.FETCHED,
+      last_status=status,
       crawl_depth=0)
   crawl_db_datum.put()
-  fetched_datum = FetchedDatum(
+  if status != pipelines.UNFETCHED:
+    fetched_datum = FetchedDatum(
+        parent=crawl_db_datum.key,
+        url=url,
+        fetched_url=url,
+        content_text=html_text)
+    fetched_datum.put()
+
+def createLinkDatum(parent_url, url):
+  """Create Link CrawlDbDatum mock data."""
+  key = ndb.Key(CrawlDbDatum, parent_url)
+  crawl_db_datum = CrawlDbDatum(
       parent=key,
       url=url,
-      fetched_url=url,
-      content_text=html_text)
-  fetched_datum.put()
+      last_status=pipelines.UNFETCHED,
+      crawl_depth=0)
+  crawl_db_datum.put()
         
 class ExactDomainPilelineTest(testutil.HandlerTestBase):
   """Tests for ExactDomainPileline."""
@@ -321,10 +332,10 @@ class PageIndexPipelineTest(testutil.HandlerTestBase):
     """Test scored page by Search API"""
     resource_neg = self.getResource("cloudysunny14.html")
     static_content_neg = resource_neg.read()
-    createMockFetchedDatum("http://cloudysunny14.html", static_content_neg)
+    createMockFetchedDatum("http://cloudysunny14.html", static_content_neg, pipelines.FETCHED)
     resource_pos = self.getResource("python_positive.html")
     static_content_pos = resource_pos.read()
-    createMockFetchedDatum("http://python_positive.html", static_content_pos)
+    createMockFetchedDatum("http://python_positive.html", static_content_pos, pipelines.FETCHED)
     p = pipelines._PageIndexPipeline("PageIndexPipeline", 
         params={
           "entity_kind": "lakshmi.datum.CrawlDbDatum"
@@ -372,10 +383,12 @@ class PageScorePipelineTest(testutil.HandlerTestBase):
     """Test scored page by Search API"""
     resource_neg = self.getResource("cloudysunny14.html")
     static_content_neg = resource_neg.read()
-    createMockFetchedDatum("http://cloudysunny14.html", static_content_neg)
+    createMockFetchedDatum("http://cloudysunny14.html", static_content_neg, pipelines.FETCHED)
     resource_pos = self.getResource("python_positive.html")
     static_content_pos = resource_pos.read()
-    createMockFetchedDatum("http://python_positive.html", static_content_pos)
+    createMockFetchedDatum("http://python_positive.html", static_content_pos, pipelines.FETCHED)
+    createMockFetchedDatum("http://link.html", static_content_pos, pipelines.UNFETCHED)
+    createLinkDatum("http://python_positive.html", "http://python_positive_link.html")
     p = pipelines.PageScorePipeline("PageScorePipeline", 
         params={
           "entity_kind": "lakshmi.datum.CrawlDbDatum"
@@ -386,13 +399,18 @@ class PageScorePipelineTest(testutil.HandlerTestBase):
 
     entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, "http://cloudysunny14.html"))
     for entity in entities:
-      print(entity.url+str(entity.page_score))
       self.assertEquals(pipelines.FETCHED, entity.last_status)
     
     entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, "http://python_positive.html"))
     for entity in entities:
-      print(entity.url+str(entity.page_score))
-      self.assertEquals(pipelines.UNFETCHED, entity.last_status)
+      if entity.url == "http://python_positive.html":
+        self.assertEquals(pipelines.FETCHED, entity.last_status)
+      elif entity.url == "http://python_positive_link.html":
+        self.assertEquals(pipelines.SCORED_PAGE_LINK, entity.last_status)      
+
+    entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, "http://link.html"))
+    for entity in entities:
+      self.assertEquals(pipelines.SKIPPED, entity.last_status)
 
 if __name__ == "__main__":
   unittest.main()
