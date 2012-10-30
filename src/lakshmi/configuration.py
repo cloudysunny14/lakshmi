@@ -126,7 +126,7 @@ class BadConfigurationParameterError(Exception):
   """A parameter passed to a status handler was invalid."""
 
 class MaxContentSizeInfo(validation.Validated):
-  """ A parameter to max content-size of mime_type. """
+  """A parameter to max content-size of mime_type. """
   
   ATTRIBUTES = {
     "content_type": r".+",

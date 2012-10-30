@@ -52,7 +52,7 @@ class FetcherBase(object):
     """To do HTTP GET request
     
     Args:
-      score_url_datum: datum of score url
+      score_url_datum: datum of score url.
       
     Returns:
       return results of HTTP GET request
@@ -71,7 +71,7 @@ def _create_user_agent(agent_name, email_address, web_address):
                                             CRAWLER_VERSION, web_address, email_address)
   
 def _create_headers(fetcher_policy):
-  """ Create HTTP headers. """
+  """Create HTTP headers. """
   return {"User-Agent": _create_user_agent(fetcher_policy.agent_name,
                                            fetcher_policy.email_address,
                                            fetcher_policy.web_address),
@@ -88,7 +88,8 @@ def _get_mime_type(content_type):
   
   Returns:
     returns string parsed to a media type.
-    If content_type is None, returns none value."""
+    If content_type is None, returns none value.
+  """
   if content_type is None:
     return None
   
@@ -102,7 +103,7 @@ def _get_mime_type(content_type):
   return mime_type
   
 def _get_max_content_size(mime_type, fetcher_policy):
-  """ Get the max content-size of mime_type from fetcher_policy """
+  """Get the max content-size of mime_type from fetcher_policy """
   content_sizes = fetcher_policy.max_content_size
   size = _get_content_size(content_sizes, mime_type)
   if not size:
@@ -130,22 +131,24 @@ class SimpleHttpFetcher(FetcherBase):
     """Initializes a SimpleHttpFetcher class.
   
     Args:
-      max_shards: number of shard for web crawl process
-      fetcher_policy: definition of policy for fetches
+      max_shards: number of shard for web crawl process.
+      fetcher_policy: definition of policy for fetches.
     
     Returns:
-      The result of fetches """
+      The result of fetches.
+    """
     self._max_shards = max_shards
     self._fetcher_policy = fetcher_policy
     self._time = time.time
 
   def get(self, fetch_url):
-    """To do HTTP GET request. 
+    """To do HTTP GET request.
+
     Args:
-      fetch_url: url for fetche.
+      fetch_url: url for fetch.
       
     Returns:
-      Return results of HTTP GET request 
+      Return results of HTTP GET request. 
     
     Raises:
       HttpFetchError: if HTTP Status is errored.
@@ -250,6 +253,6 @@ class SimpleHttpFetcher(FetcherBase):
             "headers": result.headers}
     
   def abort(self):
-    """ Abort job 
+    """Abort job 
     Actually try to abort """
 
