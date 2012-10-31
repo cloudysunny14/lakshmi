@@ -1,0 +1,5 @@
+indexes:
+  - kind: CrawlDbDatum
+    properties:
+    - name: last_status
+    - name: page_score
