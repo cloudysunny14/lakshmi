@@ -29,11 +29,12 @@ from google.appengine.api import search
 from mapreduce import base_handler
 
 from lakshmi import pipelines
+from lakshmi import configuration
 from lakshmi.datum import CrawlDbDatum
 
 ENTITY_KIND = "lakshmi.datum.CrawlDbDatum"
 #specified some urls
-ROOT_URLS = ["http://cnn.com/", "http://cloudysunny14.blogspot.jp/"]
+ROOT_URLS = ["http://www.python.org/"]
 
 
 class AddRootUrlsHandler(webapp.RequestHandler):
@@ -76,15 +77,18 @@ class DeleteDatumHandler(webapp.RequestHandler):
   def get(self):
     self.response.headers['Content-Type'] = 'text/plain'
     kind_name = self.request.get("kind", "")
-    try:
-      while True:
-        q = ndb.gql("SELECT __key__ FROM %s"%kind_name)
-        assert q.count()
-        ndb.delete_multi(q.fetch(200))
-        time.sleep(0.5)
-    except Exception, e:
-      self.response.out.write(repr(e)+'\n')
-      pass
+    if len(kind_name)>0:
+      try:
+        while True:
+          q = ndb.gql("SELECT __key__ FROM %s"%kind_name)
+          assert q.count()
+          ndb.delete_multi(q.fetch(200))
+          time.sleep(0.5)
+      except Exception, e:
+        self.response.out.write(repr(e)+'\n')
+        pass
+    else:
+      self.response.out.write("Not specified kind_name. Usage:/delete_all_data?kind=your_kind_name")
 
 class ScorePipeline(base_handler.PipelineBase):
   def run(self, entity_type):
@@ -128,13 +132,41 @@ class ReFetch(webapp.RequestHandler):
     pipeline.start()
     path = pipeline.base_path + "/status?root=" + pipeline.pipeline_id
     self.redirect(path)
-    
+
+score_config_yaml = configuration.ScoreConfigYaml.create_default_config()
+
+class CleanHandler(webapp.RequestHandler):
+  def get(self):
+    self.response.headers['Content-Type'] = 'text/plain'
+    crawl_kind_name = self.request.get("crawldb_kind", "")
+    fetched_kind_name = self.request.get("fetched_kind", "")
+    if len(crawl_kind_name)>0 and len(fetched_kind_name)>0:
+      adopt_score = score_config_yaml.score_config.adopt_score
+      try:
+        while True:
+          target_status_list = [1,3]
+          tmp_query = "SELECT __key__ FROM %s WHERE page_score <= :1 AND last_status IN:2"%crawl_kind_name
+          q = ndb.gql(tmp_query, float(adopt_score), target_status_list)
+          if not q.count():
+            break
+          ndb.delete_multi(q.fetch(200))
+          time.sleep(0.5)
+
+        path = "/delete_all_data?kind=%s"%fetched_kind_name
+        self.redirect(path)
+      except Exception, e:
+        self.response.out.write(repr(e)+'\n')
+        pass
+    else:
+      self.response.out.write("Not specified kind_name. Usage:/clean?crawldb_kind=kind_name&fetched_kind=kind_name")
+
 application = webapp.WSGIApplication(
                                      [("/start", FetchStart),
                                      ("/add_data", AddRootUrlsHandler),
                                      ("/delete_all_data", DeleteDatumHandler),
                                      ("/score", ScoreHandler),
-                                     ("/refetch", ReFetch)],
+                                     ("/refetch", ReFetch),
+                                     ("/clean", CleanHandler)],
                                      debug=True)
                                      
 def main():

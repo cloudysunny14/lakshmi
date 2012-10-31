@@ -156,7 +156,7 @@ class FetchPipelineWithSpecifiedParserTest(testutil.HandlerTestBase):
     path = os.path.join(os.path.dirname(__file__), "resource", file_name)
     return open(path)
 
-  def dtestFetchEndToEnd(self):
+  def testFetchEndToEnd(self):
     """Test for through of fetcher job"""
     createMockCrawlDbDatum("http://foo.com/bar.txt")
     static_robots = "User-agent: test\nDisallow: /content_0\nDisallow: /content_1\nDisallow: /content_3"
