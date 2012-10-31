@@ -107,11 +107,11 @@ class RemoveIndex(base_handler.PipelineBase):
 
       while True:
         # Get a list of documents populating only the doc_id field and extract the ids.
-        document_ids = [document.doc_id for document in doc_index.list_documents(ids_only=True)]
+        document_ids = [document.doc_id for document in doc_index.get_range(ids_only=True)]
         if not document_ids:
           break
         # Remove the documents for the given ids from the Index.
-        doc_index.remove(document_ids)
+        doc_index.delete(document_ids)
     
 class ScoreHandler(webapp.RequestHandler):
   def get(self):

@@ -323,7 +323,7 @@ def _fetchMap(binary_record):
   could_fetch = _str2bool(proto.value())
   result = UNFETCHED
   fetched_url = ""
-  crawl_db_datums = None
+  crawl_db_datum = None
   #Fetch to CrawlDbDatum
   try:
     crawl_db_datums = CrawlDbDatum.fetch_crawl_db_from_url(url)
@@ -541,7 +541,7 @@ def _page_index_map(crawl_db_datum):
             search.HtmlField(name="content", value=content)])
     try:
       index = search.Index(name=index_name)
-      index.add(doc)
+      index.put(doc)
     except search.Error:
       logging.warning('Add failed:'+url_str)
 
