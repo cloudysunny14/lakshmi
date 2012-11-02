@@ -487,7 +487,7 @@ class CleanPipelineTest(testutil.HandlerTestBase):
     self.emails.append((sender, subject, body, html))
 
   def testSuccessfulRun(self):
-    """Test extract outlinks by UDF."""
+    """Test clean pipeline."""
     createMockFetchedDatum("http://foo.html", "Content", pipelines.FETCHED)
     createMockFetchedDatum("http://bar.html", "Content", pipelines.SKIPPED)
     createMockFetchedDatum("http://faz.html", "Content", pipelines.FETCHED, score=0.5)
@@ -508,7 +508,7 @@ class CleanPipelineTest(testutil.HandlerTestBase):
     self.assertEquals(1, len(entities))
     entity = entities[0]
     fetched_datums = FetchedDatum.fetch_fetched_datum(entity.key)
-    self.assertEquals(1, len(fetched_datums))
+    self.assertEquals(0, len(fetched_datums))
     entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, "http://baz.html"))
     self.assertEquals(1, len(entities))
     entity = entities[0]

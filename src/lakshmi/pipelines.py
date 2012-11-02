@@ -646,8 +646,10 @@ def _page_scoring_map(binary_record):
     last_status = crawl_db_datum.last_status
     # Update the status of the status SKIPPED,
     # if the url's parent page is not preferenced page.
+    status_changed = False
     if last_status == UNFETCHED:
       crawl_db_datum.last_status = SKIPPED
+      status_changed = True
 
     sort = search.SortOptions(match_scorer=search.MatchScorer(),
         expressions=[search.SortExpression(
@@ -679,9 +681,13 @@ def _page_scoring_map(binary_record):
     except search.Error:
       logging.warning("Scorering failed:"+url)
     
-    # Update status. 
-    crawl_db_datum.page_score = score
-    crawl_db_datum.put()
+    # Update status.
+    if crawl_db_datum.page_score != score:
+      crawl_db_datum.page_score = score
+      status_changed = True
+
+    if status_changed:
+      crawl_db_datum.put()
 
   yield(url+":"+str(score)+"\n")
 
@@ -745,6 +751,7 @@ def _clean_map(crawl_db_datum):
   Returns:
     url_str: Deleted urls.
   """
+  delete_keys =  FetchedDatum.fetch_fetched_datum(crawl_db_datum.key, keys_only=True)
   data = ndb.Model.to_dict(crawl_db_datum)
   fetch_status = data.get("last_status", 2)
   url=""
@@ -754,9 +761,9 @@ def _clean_map(crawl_db_datum):
     if page_score <= float(adopt_score):
       url = data.get("url", "")
       #Fetch the relevant FetchedDatum entities
-      fetched_datums = FetchedDatum.fetch_fetched_datum(crawl_db_datum.key, keys_only=True)
-      fetched_datums.append(crawl_db_datum.key)
-      ndb.delete_multi(fetched_datums)
+      delete_keys.append(crawl_db_datum.key)
+
+  ndb.delete_multi(delete_keys)
 
   yield(url+"\n")
   
