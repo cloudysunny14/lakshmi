@@ -24,6 +24,7 @@ from urlparse import urlparse
 
 from google.appengine.ext import ndb
 from google.appengine.ext import blobstore
+from google.appengine.api import memcache
 
 from mapreduce import base_handler
 from mapreduce import mapreduce_pipeline
@@ -262,11 +263,18 @@ def _makeFetchSetBufferMap(binary_record):
   fetcher_policy_yaml = configuration.FetcherPolicyYaml.create_default_policy()
   user_agent = fetcher_policy_yaml.fetcher_policy.agent_name
   rp = robotparser.RobotFileParser()
-  rp.parse(content.split("\n").__iter__())
-  
+  try:
+    rp.parse(content.split("\n").__iter__())
+  except Exception as e:
+    logging.warning("RobotFileParser raises exception:" + e.message)
+
   #Extract urls from CrawlDbDatum.
-  query = CrawlDbDatum.query(CrawlDbDatum.extract_domain_url==extract_domain_url)
-  entities = query.fetch()
+  entities = []
+  try:
+    query = CrawlDbDatum.query(CrawlDbDatum.extract_domain_url==extract_domain_url)
+    entities = query.fetch()
+  except Exception as e:
+    logging.warning("Fetch error occurs from CrawlDbDatum" + e.message)
 
   for entity in entities:
     url = entity.url
@@ -424,13 +432,77 @@ class FetcherPipeline(base_handler.PipelineBase):
     fetch_set_buffer_files = yield _FetchSetsBufferPipeline(job_name, robots_files)
     result_files = yield _FetchPipeline(job_name, fetch_set_buffer_files, shards)
     if need_extract:
-      yield ExtractOutlinksPipeline(result_files, parser_params)
-    temp_files = [extract_domain_files, robots_files, fetch_set_buffer_files, result_files]
+      yield _ExtractOutlinksPipeline(job_name, result_files, parser_params, shards)
+    temp_files = [extract_domain_files, robots_files, fetch_set_buffer_files]
     with pipeline.After(result_files):
       all_temp_files = yield pipeline_common.Extend(*temp_files)
       yield mapper_pipeline._CleanupPipeline(all_temp_files)
 
-class ExtractOutlinksPipeline(base_handler.PipelineBase):
+_PARSER_PARAM_KEY = "PARSER_PARAM_KEY"
+
+def _set_parser_param(key, params):
+  memcache.set(key, params)
+
+def _get_parser_param(key):
+  return memcache.get(key) 
+
+def _extract_outlinks_map(data):
+  """Map function of extract outlinks from content.
+
+  Function to be extracted and parsed to extract links with UDF.
+  URL of the link that is stored only http and https.
+
+  Args:
+    data: key value data, that key is position, value is url.
+
+  Returns:
+    url: The page url.
+  """
+  k, url = data
+  entities = CrawlDbDatum.fetch_crawl_db_from_url(url)
+  for entity in entities:
+    fetched_datums = FetchedDatum.fetch_fetched_datum(entity.key)
+    content = None
+    if len(fetched_datums)>0:
+      content = fetched_datums[0].content_text
+      if not content:
+        content = fetched_datums[0].content_binary
+
+      mime_type = fetched_datums[0].content_type
+    if content is not None:
+      parsed_obj = None
+      try:
+        params = _get_parser_param(_PARSER_PARAM_KEY)
+        parsed_obj = util.handler_for_name(params[mime_type])(content)
+      except Exception as e:
+        logging.warning("Can not handle for %s[params:%s]:%s"%(mime_type, params, e.message))
+        continue
+
+      crawl_depth = entity.crawl_depth
+      crawl_depth += 1
+      try:
+        for extract_url in parsed_obj:
+          parsed_uri = urlparse(extract_url)
+          # To use url as a key, requires to string size is lower to 500 characters.
+          if len(parsed_uri) > 500:
+            continue
+  
+          if parsed_uri.scheme == "http" or parsed_uri.scheme == "https":
+            #If parsed outlink url has existing in datum, not put.
+            temp_crawldatums = CrawlDbDatum.fetch_crawl_db_from_url(extract_url)
+            if len(temp_crawldatums) == 0:
+              crawl_db_datum = CrawlDbDatum(
+                  parent=ndb.Key(CrawlDbDatum, url),
+                  url=extract_url,
+                  last_status=UNFETCHED,
+                  crawl_depth=crawl_depth)
+              crawl_db_datum.put()
+      except Exception as e:
+        logging.warning("Parsed object is not outlinks iter:"+e.message)
+
+  yield url+"\n"
+
+class _ExtractOutlinksPipeline(base_handler.PipelineBase):
   """Pipeline to execute ExtractOutlinksPipeline.
 
   Extract Outlinks from html,
@@ -439,63 +511,30 @@ class ExtractOutlinksPipeline(base_handler.PipelineBase):
   that is object to next fetchjob.
 
   Args:
-    file_names: Input filenames, consists from results of fetch job.
-    parser_params: Params for extract outlink parser for each mime-types,
-      The parser is user defined function for each mime-types, which returns 
+    job_name: Name of job.
+    blob_keys: input filenames, consists from results of fetch job.
+    parser_params: params for extract outlink parser for each mime-types,
+      the parser is user defined function for each mime-types, which returns 
       outlinks url list.
+    shard_count: number of shards.
   """
   def run(self,
+          job_name,
           file_names,
-          parser_params):
-    for file_name in file_names:
-      blob_key = files.blobstore.get_blob_key(file_name)
-      blob_reader = blobstore.BlobReader(blob_key)
-      url = blob_reader.readline()
-      while url:
-        entities = CrawlDbDatum.fetch_crawl_db_from_url(url.rstrip("\n"))
-        for entity in entities:
-          fetched_datums = FetchedDatum.fetch_fetched_datum(entity.key)
-          content = None
-          if len(fetched_datums)>0:
-            content = fetched_datums[0].content_text
-            if not content:
-              content = fetched_datums[0].content_binary
-
-            mime_type = fetched_datums[0].content_type
-          if content is not None:
-            parsed_obj = None
-            try:
-              parsed_obj = util.handler_for_name(parser_params[mime_type])(content)
-            except Exception as e:
-              logging.warning("Can not handle for %s:%s"%(mime_type, e.message))
-              continue
-
-            crawl_depth = entity.crawl_depth
-            crawl_depth += 1
-            try:
-              for extract_url in parsed_obj:
-                parsed_uri = urlparse(extract_url)
-                # To use url as a key, requires to string size is lower to 500 characters.
-                if len(parsed_uri) > 500:
-                  continue
-  
-                if parsed_uri.scheme == "http" or parsed_uri.scheme == "https":
-                  #If parsed outlink url has existing in datum, not put.
-                  temp_crawldatums = CrawlDbDatum.fetch_crawl_db_from_url(extract_url)
-                  if len(temp_crawldatums) == 0:
-                    crawl_db_datum = CrawlDbDatum(
-                        parent=ndb.Key(CrawlDbDatum, url.rstrip("\n")),
-                        url=extract_url,
-                        last_status=UNFETCHED,
-                        crawl_depth=crawl_depth)
-                    crawl_db_datum.put()
-            except Exception as e:
-              logging.warning("Parsed object is not outlinks iter:"+e.message)
-
-        url = blob_reader.readline()
+          parser_params,
+          shard_count=8):
+    _set_parser_param(_PARSER_PARAM_KEY, parser_params)
+    yield mapreduce_pipeline.MapperPipeline(
+      job_name,
+      __name__ + "._extract_outlinks_map",
+      __name__ + "._RobotsLineInputReader",
+      output_writer_spec=output_writers.__name__ + ".BlobstoreOutputWriter" ,
+      params={
+        "blob_keys": file_names,
+      },
+      shards=shard_count)
 
 from google.appengine.api import search
-from google.appengine.api import memcache
 
 score_config_yaml = configuration.ScoreConfigYaml.create_default_config()
 INDEX_NAME = "lakshmi_index"
@@ -515,11 +554,11 @@ def _page_index_map(crawl_db_datum):
   make the data it describes searchable.
 
   Args:
-    crawl_db_datum: The entity of crawl_db_datum.
+    crawl_db_datum: entity of crawl_db_datum.
 
   Returns:
-    url_str: Indexed document of url.
-    index_name: The name of index that appended number generated by 
+    url_str: indexed document of url.
+    index_name: name of index that appended number generated by 
       _get_index_num() to INDEX_NAME.
   """
   data = ndb.Model.to_dict(crawl_db_datum)
@@ -607,7 +646,7 @@ def _page_scoring_map(binary_record):
     last_status = crawl_db_datum.last_status
     # Update the status of the status SKIPPED,
     # if the url's parent page is not preferenced page.
-    if last_status != SCORED_PAGE_LINK and last_status != FETCHED:
+    if last_status == UNFETCHED:
       crawl_db_datum.last_status = SKIPPED
 
     sort = search.SortOptions(match_scorer=search.MatchScorer(),
@@ -634,7 +673,7 @@ def _page_scoring_map(binary_record):
             #Update the status of the link, that extracted from the scored page.
             entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, url))
             for entity in entities:
-              if entity.last_status != FETCHED:
+              if entity.last_status == UNFETCHED or entity.last_status == SKIPPED:
                 entity.last_status = SCORED_PAGE_LINK
                 entity.put()
     except search.Error:
@@ -651,7 +690,7 @@ class _PageScorePipeline(base_handler.PipelineBase):
 
   Args:
     job_name: job name as string.
-    file_names: FileNames of KeyValue record that 
+    file_names: fileNames of KeyValue record that 
       key is url, value is index name.
 
   Returns:
@@ -671,7 +710,7 @@ class _PageScorePipeline(base_handler.PipelineBase):
       shards=len(file_names))
 
 class PageScorePipeline(base_handler.PipelineBase):
-  """Pipeline to execute Fetch jobs.
+  """Pipeline to execute PageScore jobs.
   
   Args:
     job_name: job name as string.
@@ -694,3 +733,57 @@ class PageScorePipeline(base_handler.PipelineBase):
     with pipeline.After(result_files):
       all_temp_files = yield pipeline_common.Extend(*temp_files)
       yield mapper_pipeline._CleanupPipeline(all_temp_files)
+
+def _clean_map(crawl_db_datum):
+  """Delete entities map function.
+
+  Delete unnecessary entities, also FetchedDatum. 
+
+  Args:
+    crawl_db_datum: The entity of crawl_db_datum.
+
+  Returns:
+    url_str: Deleted urls.
+  """
+  data = ndb.Model.to_dict(crawl_db_datum)
+  fetch_status = data.get("last_status", 2)
+  url=""
+  if fetch_status in [FETCHED, SKIPPED, FAILED]:
+    adopt_score = score_config_yaml.score_config.adopt_score
+    page_score = data.get("page_score", 0.0)
+    if page_score <= float(adopt_score):
+      url = data.get("url", "")
+      #Fetch the relevant FetchedDatum entities
+      fetched_datums = FetchedDatum.fetch_fetched_datum(crawl_db_datum.key, keys_only=True)
+      fetched_datums.append(crawl_db_datum.key)
+      ndb.delete_multi(fetched_datums)
+
+  yield(url+"\n")
+  
+
+class CleanDatumPipeline(base_handler.PipelineBase):
+  """Pipeline to execute CleanDatum jobs.
+
+  This pipeline is to delete unnecessary entity from datastore,
+  that affect page scoring jobs to efficiency.
+  
+  Args:
+    job_name: name of jobs.
+    params: specifing name of the datums kind.
+    shards: number of shards.
+
+  Returns:
+    file_names: The result files.
+  """
+  def run(self,
+          job_name,
+          params,
+          shards=8):
+    yield mapreduce_pipeline.MapperPipeline(
+      job_name,
+      __name__+"._clean_map",
+      "mapreduce.input_readers.DatastoreInputReader",
+      output_writer_spec=output_writers.__name__ + ".BlobstoreOutputWriter" ,
+      params=params,
+      shards=shards)
+

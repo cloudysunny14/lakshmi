@@ -68,7 +68,7 @@ class FetchStart(webapp.RequestHandler):
           "application/atom+xml": "main._htmlOutlinkParser",
           "text/xml": "main._htmlOutlinkParser"
         },
-        shards=8)
+        shards=16)
     pipeline.start()
     path = pipeline.base_path + "/status?root=" + pipeline.pipeline_id
     self.redirect(path)
@@ -96,7 +96,7 @@ class ScorePipeline(base_handler.PipelineBase):
         params={
           "entity_kind": entity_type
         },
-        shards=8)
+        shards=16)
     yield RemoveIndex(output)
     
 class RemoveIndex(base_handler.PipelineBase):
@@ -128,7 +128,7 @@ class ReFetch(webapp.RequestHandler):
         },
         parser_params=None,
         need_extract=False,
-        shards=8)
+        shards=16)
     pipeline.start()
     path = pipeline.base_path + "/status?root=" + pipeline.pipeline_id
     self.redirect(path)
@@ -137,28 +137,14 @@ score_config_yaml = configuration.ScoreConfigYaml.create_default_config()
 
 class CleanHandler(webapp.RequestHandler):
   def get(self):
-    self.response.headers['Content-Type'] = 'text/plain'
-    crawl_kind_name = self.request.get("crawldb_kind", "")
-    fetched_kind_name = self.request.get("fetched_kind", "")
-    if len(crawl_kind_name)>0 and len(fetched_kind_name)>0:
-      adopt_score = score_config_yaml.score_config.adopt_score
-      try:
-        while True:
-          target_status_list = [1,3]
-          tmp_query = "SELECT __key__ FROM %s WHERE page_score <= :1 AND last_status IN:2"%crawl_kind_name
-          q = ndb.gql(tmp_query, float(adopt_score), target_status_list)
-          if not q.count():
-            break
-          ndb.delete_multi(q.fetch(200))
-          time.sleep(0.5)
-
-        path = "/delete_all_data?kind=%s"%fetched_kind_name
-        self.redirect(path)
-      except Exception, e:
-        self.response.out.write(repr(e)+'\n')
-        pass
-    else:
-      self.response.out.write("Not specified kind_name. Usage:/clean?crawldb_kind=kind_name&fetched_kind=kind_name")
+    pipeline = pipelines.CleanDatumPipeline("CleanDatumPipeline",
+        params={
+          "entity_kind": ENTITY_KIND
+        },
+        shards=8)
+    pipeline.start()
+    path = pipeline.base_path + "/status?root=" + pipeline.pipeline_id
+    self.redirect(path)
 
 application = webapp.WSGIApplication(
                                      [("/start", FetchStart),

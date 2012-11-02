@@ -83,5 +83,5 @@ class FetchedDatum(ndb.Model):
     return "FetchedDatum"
 
   @classmethod
-  def fetch_fetched_datum(cls, ancestor_key):
-    return cls.query(ancestor=ancestor_key).fetch()
+  def fetch_fetched_datum(cls, ancestor_key, keys_only=False):
+    return cls.query(ancestor=ancestor_key).fetch(keys_only=keys_only)
