@@ -207,7 +207,7 @@ class RobotFetcherPipelineTest(testutil.HandlerTestBase):
       key = proto.key()
       value = proto.value()
       self.assertEquals("invalidScheme://test_url.com", key)
-      self.assertEquals("User-agent: *\nAllow: /", value)
+      self.assertEquals("User-agent: *\nDisallow: /", value)
 
 class FetchSetsBufferPipelineTest(testutil.HandlerTestBase):
   """Tests for FetchSetsBufferPipeline."""

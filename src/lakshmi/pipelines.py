@@ -210,7 +210,7 @@ def _robots_fetch_map(data):
     content = result.get("content")
   except Exception as e:
     logging.warning("Robots.txt Fetch Error Occurs:" + e.message)
-    content = "User-agent: *\nAllow: /"
+    content = "User-agent: *\nDisallow: /"
 
   yield (url, content)
 
@@ -263,6 +263,7 @@ def _makeFetchSetBufferMap(binary_record):
   fetcher_policy_yaml = configuration.FetcherPolicyYaml.create_default_policy()
   user_agent = fetcher_policy_yaml.fetcher_policy.agent_name
   rp = robotparser.RobotFileParser()
+  can_fetch = False
   try:
     rp.parse(content.split("\n").__iter__())
   except Exception as e:
@@ -283,7 +284,6 @@ def _makeFetchSetBufferMap(binary_record):
     except Exception as e:
       logging.warning("RobotFileParser raises exception:" + e.message)
       url = ""
-      can_fetch = False
 
     yield (url, can_fetch)
 
