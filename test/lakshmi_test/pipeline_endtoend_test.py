@@ -181,6 +181,52 @@ class FetchPipelineWithSpecifiedParserTest(testutil.HandlerTestBase):
         shards=2)
     p.start()
     test_support.execute_until_empty(self.taskqueue)
-    
+
+class FetchPipelineFilteredDomainTest(testutil.HandlerTestBase):
+  """Test for FetchPipeline"""
+  def setUp(self):
+    testutil.HandlerTestBase.setUp(self, urlfetch_mock=URLFetchServiceMockForUrl())
+    pipeline.Pipeline._send_mail = self._send_mail
+    self.emails = []
+  
+  def _send_mail(self, sender, subject, body, html=None):
+    """Callback function for sending mail."""
+    self.emails.append((sender, subject, body, html))
+
+  def getResource(self, file_name):
+    """ to get contents from resource"""
+    path = os.path.join(os.path.dirname(__file__), "resource", file_name)
+    return open(path)
+
+  def testFetchEndToEnd(self):
+    """Test for through of fetcher job"""
+    createMockCrawlDbDatum("http://appengine.google.com/bar.txt")
+    static_robots = "User-agent: test\nDisallow: /content_0\nDisallow: /content_1\nDisallow: /content_3"
+    self.setReturnValue(url="http://appengine.google.com/robots.txt",
+        content=static_robots,
+        headers={"Content-Length": len(static_robots),
+          "content-type": "text/html"})
+    resource = self.getResource("cloudysunny14.html")
+    static_content = resource.read()
+    static_content_length = len(static_content)
+    self.setReturnValue(url="http://appengine.google.com/bar.txt",
+        content=static_content,
+        headers={"Content-Length": static_content_length,
+            "Content-Type": "text/plain"})
+    p = pipelines.FetcherPipeline("FetcherPipeline",
+        params={
+          "entity_kind": "lakshmi.datum.CrawlDbDatum"
+        },
+        parser_params={
+          "text/html": __name__ + "._htmlOutlinkParser"
+        },
+        shards=2)
+    p.start()
+    test_support.execute_until_empty(self.taskqueue)
+    entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, "http://appengine.google.com/bar.txt"))
+    entity = entities[0]
+    fetched_datums = FetchedDatum.fetch_fetched_datum(entity.key)
+    self.assertEquals(0, len(fetched_datums))    
+
 if __name__ == "__main__":
   unittest.main()

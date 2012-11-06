@@ -15,7 +15,6 @@
 # limitations under the License.
 
 import unittest
-import logging
 import os
 import re
 

@@ -331,7 +331,7 @@ class ScoreConfigYaml(validation.Validated):
   File format:
 
   score_config:
-    topic_terms: Python, GoogleAppEngine
+    score_query: Python GoogleAppEngine
     adopt_score: 0.5
 
   Where
@@ -367,6 +367,123 @@ class ScoreConfigYaml(validation.Validated):
     out = {
       "score_query": score_config.score_query,
       "adopt_score": score_config.adopt_score,
+    }
+
+    return out
+
+UF_RESOURCE_PATH="resource"
+UF_YAML_NAME="url_filter.yaml"
+
+def find_url_filter_yaml(conf_file=__file__):
+  """Traverse directory trees to find url_filter.yaml file.
+
+  Begins with the location of configuration.py and then moves on to check the working
+  directory.
+
+  Args:
+    status_file: location of configuration.py, overridable for testing purposes.
+
+  Returns:
+    the path of url_filter.yaml file or None if not found.
+  """
+  checked = set()
+  yaml = _find_url_filter_yaml(os.path.dirname(conf_file), checked)
+  if not yaml:
+    yaml = _find_url_filter_yaml(os.getcwd(), checked)
+  return yaml
+
+def _find_url_filter_yaml(start, checked):
+  """Traverse the directory tree identified by start until a directory already
+  in checked is encountered or the path of url_filter.yaml is found.
+
+  Checked is present both to make loop termination easy to reason about and so
+  that the same directories do not get rechecked.
+
+  Args:
+    start: the path to start in and work upward from
+    checked: the set of already examined directories
+
+  Returns:
+    the path of url_filter.yaml file or None if not found.
+  """
+  dir = start
+  while dir not in checked:
+    checked.add(dir)
+    yaml_path = os.path.join(dir, UF_YAML_NAME)
+    if os.path.exists(yaml_path):
+      return yaml_path
+    dir = os.path.dirname(dir)
+  return None
+
+def parse_url_filter_yaml(contents):
+  """Parses url_filter.yaml file contents.
+
+  Args:
+    contents: url_filter.yaml file contents.
+
+  Returns:
+    UrlFilterYaml object with all the data from original file.
+
+  Raises:
+    errors.BadYamlError: when contents is not a valid url_filter.yaml file.
+  """
+  try:
+    builder = yaml_object.ObjectBuilder(UrlFilterYaml)
+    handler = yaml_builder.BuilderHandler(builder)
+    listener = yaml_listener.EventListener(handler)
+    listener.Parse(contents)
+
+    fp_info = handler.GetResults()
+  except (ValueError, yaml_errors.EventError), e:
+    raise errors.BadYamlError(e)
+
+  if len(fp_info) < 1:
+    raise errors.BadYamlError("No configs found in url_filter.yaml")
+  if len(fp_info) > 1:
+    raise errors.MultipleDocumentsInFpYaml("Found %d YAML documents" %
+                                           len(fp_info))
+
+  jobs = fp_info[0]
+
+  return jobs
+
+class UrlFilterYaml(validation.Validated):
+  """Root class for url_filter.yaml.
+
+  File format:
+
+  domain_urlfilter:
+    - http://hoge.com
+    
+  Where
+    domain_urlfilter: The filter target url list root.
+  """
+
+  ATTRIBUTES = {
+      "domain_urlfilter": validation.Optional(list)
+  }
+  
+  @classmethod
+  def create_default_urlfilter(cls):
+    path = os.path.join(os.path.dirname(__file__), SC_RESOURCE_PATH, UF_YAML_NAME)
+    url_filter_yaml = parse_url_filter_yaml(open(path))
+    return url_filter_yaml
+  
+  @staticmethod
+  def to_dict(url_filter_yaml):
+    """Converts a UrlFilterYaml file into a JSON-encodable dictionary.
+
+    For use in user-visible UI and internal methods for interfacing with
+    user code (like param validation). as a list
+
+    Args:
+      url_filter_yaml: The python representation of the url_filter.yaml document.
+
+    Returns:
+      A list of configuration dictionaries.
+    """
+    out = {
+      "domain_urlfilter": url_filter_yaml.domain_urlfilter,
     }
 
     return out

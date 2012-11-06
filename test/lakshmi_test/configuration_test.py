@@ -281,5 +281,83 @@ class ScoreConfigYamlTest(unittest.TestCase):
             'adopt_score': "0.5"
       }, all_configs)
 
+class UrlFilterYamlTest(unittest.TestCase):
+  """Testing url_filter.yaml-related functionality."""
+  
+  def set_up_directory_tree(self, dir_tree_contents):
+    """Create directory tree from dict of path:contents entries."""
+    for full_path, contents in dir_tree_contents.iteritems():
+      dir_name = os.path.dirname(full_path)
+      if not os.path.isdir(dir_name):
+        os.makedirs(dir_name)
+      f = open(full_path, 'w')
+      f.write(contents)
+      f.close()
+
+  def setUp(self):
+    """Initialize temporary application variable."""
+    self.tempdir = tempfile.mkdtemp()
+
+  def tearDown(self):
+    """Remove temporary application directory."""
+    if self.tempdir:
+      shutil.rmtree(self.tempdir)
+
+  def testFindYamlFile(self):
+    """Test if url_filter.yaml can be found with different app/library trees."""
+    test_conf = os.path.join(self.tempdir, "library_root", "lakshmi", "configuration.py")
+    test_url_filter = os.path.join(self.tempdir, "application_root",
+                                       "url_filter.yaml")
+    test_dict = {
+        test_conf: "test",
+        test_url_filter: "test",
+    }
+    self.set_up_directory_tree(test_dict)
+    os.chdir(os.path.dirname(test_url_filter))
+    yaml_loc = configuration.find_url_filter_yaml(conf_file=test_conf)
+    self.assertEqual(("/private%s" % test_url_filter), yaml_loc)
+
+  def testFindYamlFileSameTree(self):
+    """Test if url_filter.yaml can be found with the same app/library tree."""
+    test_conf = os.path.join(self.tempdir, "library_root", "lakshmi", "configuration.py")
+    test_url_filter_yaml = os.path.join(self.tempdir, "application_root",
+                                       "url_filter.yaml")
+    test_dict = {
+        test_conf: "test",
+        test_url_filter_yaml: "test",
+    }
+    self.set_up_directory_tree(test_dict)
+    os.chdir(os.path.dirname(test_url_filter_yaml))
+    yaml_loc = configuration.find_url_filter_yaml(conf_file=test_conf)
+    self.assertEqual(("/private%s" % test_url_filter_yaml), yaml_loc)
+
+  def testParseEmptyFile(self):
+    """Parsing empty url_filter.yaml file."""
+    self.assertRaises(errors.BadYamlError,
+                      configuration.parse_url_filter_yaml,
+                      "")
+
+  def testParse(self):
+    """Parsing a single document in url_filter.yaml."""
+    url_filter_yaml = configuration.parse_url_filter_yaml(
+        "domain_urlfilter:\n"
+        "  - http://foo.com\n"
+        "  - http://bar.com\n")
+
+    self.assertTrue(url_filter_yaml)
+    self.assertTrue(str(["http://foo.com", "http://bar.com"]), str(url_filter_yaml.domain_urlfilter))
+
+  def testToDict(self):
+    """Tests encoding the UF document as JSON."""
+    uf_yaml = configuration.parse_url_filter_yaml(
+        "domain_urlfilter:\n"
+        "  - http://foo.com\n"
+        "  - http://bar.com\n")
+    all_configs = configuration.UrlFilterYaml.to_dict(uf_yaml)
+    self.assertEquals(
+      {
+            "domain_urlfilter": ["http://foo.com", "http://bar.com"],
+      }, all_configs)
+
 if __name__ == "__main__":
   unittest.main()

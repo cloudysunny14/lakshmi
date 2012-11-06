@@ -214,8 +214,6 @@ def _robots_fetch_map(data):
 
   yield (url, content)
 
-fetcher_policy_yaml = configuration.FetcherPolicyYaml.create_default_policy()
-
 class _RobotsFetchPipeline(base_handler.PipelineBase):
   """Pipeline to execute RobotFetch jobs.
   
@@ -241,6 +239,9 @@ class _RobotsFetchPipeline(base_handler.PipelineBase):
           },
       shards=shards)
 
+fetcher_policy_yaml = configuration.FetcherPolicyYaml.create_default_policy()
+url_filter_yaml = configuration.UrlFilterYaml.create_default_urlfilter()
+
 def _makeFetchSetBufferMap(binary_record):
   """Map function of create fetch buffers,
   that output thus is one or more fetch url to fetch or skip.
@@ -258,17 +259,16 @@ def _makeFetchSetBufferMap(binary_record):
   proto.ParseFromString(binary_record)
   extract_domain_url = proto.key()
   content = proto.value()
-  
+  filtered_domain_list = url_filter_yaml.domain_urlfilter
+  can_fetch = False
   #Get the fetcher policy from resource.
-  fetcher_policy_yaml = configuration.FetcherPolicyYaml.create_default_policy()
   user_agent = fetcher_policy_yaml.fetcher_policy.agent_name
   rp = robotparser.RobotFileParser()
-  can_fetch = False
   try:
     rp.parse(content.split("\n").__iter__())
   except Exception as e:
     logging.warning("RobotFileParser raises exception:" + e.message)
-
+  
   #Extract urls from CrawlDbDatum.
   entities = []
   try:
@@ -284,6 +284,12 @@ def _makeFetchSetBufferMap(binary_record):
     except Exception as e:
       logging.warning("RobotFileParser raises exception:" + e.message)
       url = ""
+
+    # If extract_domain_url was contains filtered_domain_urls,
+    # all url don't fetch, which belong to filtered domain. 
+    if extract_domain_url in filtered_domain_list:
+      can_fetch = False
+      print("FALSE!!")
 
     yield (url, can_fetch)
 
@@ -755,18 +761,24 @@ def _clean_map(crawl_db_datum):
   data = ndb.Model.to_dict(crawl_db_datum)
   fetch_status = data.get("last_status", 2)
   url=""
-  if fetch_status in [FETCHED, SKIPPED, FAILED]:
-    adopt_score = score_config_yaml.score_config.adopt_score
-    page_score = data.get("page_score", 0.0)
-    if page_score <= float(adopt_score):
-      url = data.get("url", "")
-      #Fetch the relevant FetchedDatum entities
-      delete_keys.append(crawl_db_datum.key)
+  clean_all = memcache.get(CLEAN_ALL_KEY)
+  if clean_all:
+    delete_keys.append(crawl_db_datum.key)
+  else:
+    if fetch_status in [FETCHED, SKIPPED, FAILED]:
+      adopt_score = score_config_yaml.score_config.adopt_score
+      page_score = data.get("page_score", 0.0)
+      if page_score <= float(adopt_score):
+        url = data.get("url", "")
+        #Fetch the relevant FetchedDatum entities
+        delete_keys.append(crawl_db_datum.key)
 
   ndb.delete_multi(delete_keys)
 
   yield(url+"\n")
   
+
+CLEAN_ALL_KEY = "CLEAN_ALL"
 
 class CleanDatumPipeline(base_handler.PipelineBase):
   """Pipeline to execute CleanDatum jobs.
@@ -785,7 +797,9 @@ class CleanDatumPipeline(base_handler.PipelineBase):
   def run(self,
           job_name,
           params,
+          clean_all=False,
           shards=8):
+    memcache.set(key=CLEAN_ALL_KEY, value=clean_all)
     yield mapreduce_pipeline.MapperPipeline(
       job_name,
       __name__+"._clean_map",
