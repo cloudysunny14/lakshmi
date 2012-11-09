@@ -289,7 +289,6 @@ def _makeFetchSetBufferMap(binary_record):
     # all url don't fetch, which belong to filtered domain. 
     if extract_domain_url in filtered_domain_list:
       can_fetch = False
-      print("FALSE!!")
 
     yield (url, can_fetch)
 
@@ -377,9 +376,11 @@ def _fetchMap(binary_record):
   
   if crawl_db_datum is not None:
     #update the crawlDbDatum's status
-    crawl_db_datum.last_updated = datetime.datetime.now()
-    crawl_db_datum.last_status = result
-    crawl_db_datum.put()
+    for entity in crawl_db_datums:
+      entity.last_updated = datetime.datetime.now()
+      entity.last_status = result
+    #update entities
+    ndb.put_multi(crawl_db_datums)
   
   yield fetched_url
 
@@ -486,11 +487,12 @@ def _extract_outlinks_map(data):
 
       crawl_depth = entity.crawl_depth
       crawl_depth += 1
+      outlinks_datums = []
       try:
         for extract_url in parsed_obj:
           parsed_uri = urlparse(extract_url)
           # To use url as a key, requires to string size is lower to 500 characters.
-          if len(parsed_uri) > 500:
+          if len(extract_url) > 500:
             continue
   
           if parsed_uri.scheme == "http" or parsed_uri.scheme == "https":
@@ -502,9 +504,11 @@ def _extract_outlinks_map(data):
                   url=extract_url,
                   last_status=UNFETCHED,
                   crawl_depth=crawl_depth)
-              crawl_db_datum.put()
+              outlinks_datums.append(crawl_db_datum)
       except Exception as e:
         logging.warning("Parsed object is not outlinks iter:"+e.message)
+      #Put all extracted outlinks
+      ndb.put_multi(outlinks_datums)
 
   yield url+"\n"
 
@@ -648,15 +652,16 @@ def _page_scoring_map(binary_record):
 
   score = 0.0
   if len(crawl_db_datums)>0:
+    for entity in crawl_db_datums: 
+      last_status = entity.last_status
+      # Update the status of the status SKIPPED,
+      # if the url's parent page is not preferenced page.
+      status_changed = False
+      if last_status == UNFETCHED:
+        entity.last_status = SKIPPED
+        status_changed = True
+    # Target crawl_db_datum of scoring is one of the crawl_db_datums.
     crawl_db_datum = crawl_db_datums[0]
-    last_status = crawl_db_datum.last_status
-    # Update the status of the status SKIPPED,
-    # if the url's parent page is not preferenced page.
-    status_changed = False
-    if last_status == UNFETCHED:
-      crawl_db_datum.last_status = SKIPPED
-      status_changed = True
-
     sort = search.SortOptions(match_scorer=search.MatchScorer(),
         expressions=[search.SortExpression(
         expression='_score',
@@ -693,7 +698,7 @@ def _page_scoring_map(binary_record):
       status_changed = True
 
     if status_changed:
-      crawl_db_datum.put()
+      ndb.put_multi(crawl_db_datums)
 
   yield(url+":"+str(score)+"\n")
 

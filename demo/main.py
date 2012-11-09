@@ -19,7 +19,6 @@
 
 __author__ = """cloudysunny14@gmail.com (Kiyonari Harigae)"""
 
-import time
 import re
 from google.appengine.ext.webapp.util import run_wsgi_app
 from google.appengine.ext import ndb
@@ -75,20 +74,15 @@ class FetchStart(webapp.RequestHandler):
 
 class DeleteDatumHandler(webapp.RequestHandler):
   def get(self):
-    self.response.headers['Content-Type'] = 'text/plain'
-    kind_name = self.request.get("kind", "")
-    if len(kind_name)>0:
-      try:
-        while True:
-          q = ndb.gql("SELECT __key__ FROM %s"%kind_name)
-          assert q.count()
-          ndb.delete_multi(q.fetch(200))
-          time.sleep(0.5)
-      except Exception, e:
-        self.response.out.write(repr(e)+'\n')
-        pass
-    else:
-      self.response.out.write("Not specified kind_name. Usage:/delete_all_data?kind=your_kind_name")
+    pipeline = pipelines.CleanDatumPipeline("CleanAllDatumPipeline",
+        params={
+          "entity_kind": ENTITY_KIND
+        },
+        clean_all=True,
+        shards=8)
+    pipeline.start()
+    path = pipeline.base_path + "/status?root=" + pipeline.pipeline_id
+    self.redirect(path) 
 
 class ScorePipeline(base_handler.PipelineBase):
   def run(self, entity_type):
@@ -149,7 +143,7 @@ class CleanHandler(webapp.RequestHandler):
 application = webapp.WSGIApplication(
                                      [("/start", FetchStart),
                                      ("/add_data", AddRootUrlsHandler),
-                                     ("/delete_all_data", DeleteDatumHandler),
+                                     ("/clean_all", DeleteDatumHandler),
                                      ("/score", ScoreHandler),
                                      ("/refetch", ReFetch),
                                      ("/clean", CleanHandler)],

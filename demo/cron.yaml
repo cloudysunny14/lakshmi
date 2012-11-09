@@ -1,8 +1,13 @@
 cron: 
 #lakshmi forcused crawling schedule sample.
-#- description: fetch job
-  #url: /start
-  #schedule: every day 02:00
-#- description: scoring job
-  #url: /score
-  #schedule: every day 05:00
+- description: clean job
+  url: /clean
+  schedule: every day 22:30
+
+- description: fetch job
+  url: /start
+  schedule: every day 23:00
+
+- description: scoring job
+  url: /score
+  schedule: every day 00:00

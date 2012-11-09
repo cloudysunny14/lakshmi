@@ -10,6 +10,6 @@ fetcher_policy:
   crawl_delay: 0
   max_redirects: 20
   accept_language: en-us,en-gb,en;q=0.7,*;q=0.3
-  valid_mime_types: text/html,text/plain,text/xml,application/atom+xml,application/rss+xml
+  valid_mime_types: text/html,text/plain
   redirect_mode: follow_all
   request_timeout: 20000
