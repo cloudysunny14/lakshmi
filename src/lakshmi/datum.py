@@ -39,19 +39,11 @@ class CrawlDbDatum(ndb.Model):
                              indexed=False)
   last_status = ndb.IntegerProperty()
   crawl_depth = ndb.IntegerProperty(indexed=False)
-  page_score = ndb.FloatProperty()
+  page_score = ndb.FloatProperty(indexed=False)
   
   @classmethod
   def kind(cls):
     return "CrawlDbDatum"
-  
-  @classmethod
-  def fetch_crawl_db(cls, ancestor_key):
-    return cls.query(ancestor=ancestor_key).fetch()
-
-  @classmethod
-  def fetch_crawl_db_from_url(cls, url):
-    return cls.query(CrawlDbDatum.url==url).fetch()
   
 class FetchedDatum(ndb.Model):
   """Hold the fetched result.
@@ -81,7 +73,3 @@ class FetchedDatum(ndb.Model):
   @classmethod
   def kind(cls):
     return "FetchedDatum"
-
-  @classmethod
-  def fetch_fetched_datum(cls, ancestor_key, keys_only=False):
-    return cls.query(ancestor=ancestor_key).fetch(keys_only=keys_only)

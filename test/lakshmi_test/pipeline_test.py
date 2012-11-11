@@ -39,7 +39,6 @@ def createMockCrawlDbDatum(domain_count, url_count, isExtracted):
         extracted_url = None
         if isExtracted:
           extracted_url = "http://hoge_%d.com"%(d)
-        print("insertMock" + url)
         datum = CrawlDbDatum(
             parent =ndb.Key(CrawlDbDatum, url),
             url=url,
@@ -51,31 +50,18 @@ def createMockCrawlDbDatum(domain_count, url_count, isExtracted):
 def createMockFetchedDatum(url, html_text, status, score=0.0):
   """Create FetchedDatum mock data."""
   key = ndb.Key(CrawlDbDatum, url)
-  crawl_db_datum = CrawlDbDatum(
-      parent=key,
-      url=url,
-      last_status=status,
-      page_score=score,
-      crawl_depth=0)
-  crawl_db_datum.put()
+  CrawlDbDatum.get_or_insert(url, parent=key,
+      url=url, last_status=status, crawl_depth=0, page_score=score)
   if status != pipelines.UNFETCHED:
-    fetched_datum = FetchedDatum(
-        parent=crawl_db_datum.key,
-        url=url,
-        fetched_url=url,
-        content_type="text/html",
-        content_text=html_text)
-    fetched_datum.put()
+    FetchedDatum.get_or_insert(url,
+        url=url, fetched_url = url,
+        content_text = html_text, content_type="text/html")
 
 def createLinkDatum(parent_url, url):
   """Create Link CrawlDbDatum mock data."""
   key = ndb.Key(CrawlDbDatum, parent_url)
-  crawl_db_datum = CrawlDbDatum(
-      parent=key,
-      url=url,
-      last_status=pipelines.UNFETCHED,
-      crawl_depth=0)
-  crawl_db_datum.put()
+  CrawlDbDatum.get_or_insert(url, parent=key,
+      url=url, last_status=pipelines.UNFETCHED, crawl_depth=0)
         
 class ExactDomainPilelineTest(testutil.HandlerTestBase):
   """Tests for ExactDomainPileline."""
@@ -308,10 +294,9 @@ class FetchPipelineTest(testutil.HandlerTestBase):
     self.assertTrue(file_paths[0].startswith("/blobstore/"))
     
     
-    entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, "http://hoge_0.com/content_0"))
+    entities = CrawlDbDatum.query(CrawlDbDatum.url=="http://hoge_0.com/content_0").fetch()
     entity = entities[0]
-    fetched_datums = FetchedDatum.fetch_fetched_datum(entity.key)
-    fetched_datum = fetched_datums[0]
+    fetched_datum = FetchedDatum.get_by_id(entity.url)
     self.assertTrue(fetched_datum is not None)
 
 class PageIndexPipelineTest(testutil.HandlerTestBase):
@@ -385,12 +370,12 @@ class PageScorePipelineTest(testutil.HandlerTestBase):
     """Test scored page by Search API"""
     resource_neg = self.getResource("cloudysunny14.html")
     static_content_neg = resource_neg.read()
-    createMockFetchedDatum("http://cloudysunny14.html", static_content_neg, pipelines.FETCHED)
+    createMockFetchedDatum("http://cloudysunny14_neg.html", static_content_neg, pipelines.FETCHED)
     resource_pos = self.getResource("python_positive.html")
     static_content_pos = resource_pos.read()
-    createMockFetchedDatum("http://python_positive.html", static_content_pos, pipelines.FETCHED)
+    createMockFetchedDatum("http://python_positive02.html", static_content_pos, pipelines.FETCHED)
     createMockFetchedDatum("http://link.html", static_content_pos, pipelines.UNFETCHED)
-    createLinkDatum("http://python_positive.html", "http://python_positive_link.html")
+    createLinkDatum("http://python_positive02.html", "http://python_positive_link.html")
     p = pipelines.PageScorePipeline("PageScorePipeline", 
         params={
           "entity_kind": "lakshmi.datum.CrawlDbDatum"
@@ -399,18 +384,16 @@ class PageScorePipelineTest(testutil.HandlerTestBase):
     p.start()
     test_support.execute_until_empty(self.taskqueue)
 
-    entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, "http://cloudysunny14.html"))
+    entities = CrawlDbDatum.query(ancestor=ndb.Key(CrawlDbDatum, "http://cloudysunny14_neg.html")).fetch()
     for entity in entities:
       self.assertEquals(pipelines.FETCHED, entity.last_status)
     
-    entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, "http://python_positive.html"))
+    entities = CrawlDbDatum.query(ancestor=ndb.Key(CrawlDbDatum, "http://python_positive02.html")).fetch()
     for entity in entities:
-      if entity.url == "http://python_positive.html":
-        self.assertEquals(pipelines.FETCHED, entity.last_status)
-      elif entity.url == "http://python_positive_link.html":
+      if entity.url == "http://python_positive_link.html":
         self.assertEquals(pipelines.SCORED_PAGE_LINK, entity.last_status)      
 
-    entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, "http://link.html"))
+    entities = CrawlDbDatum.query(ancestor=ndb.Key(CrawlDbDatum, "http://link.html")).fetch()
     for entity in entities:
       self.assertEquals(pipelines.SKIPPED, entity.last_status)
 
@@ -458,10 +441,9 @@ class ExtractOutlinksPipelineTest(testutil.HandlerTestBase):
     p.start()
     test_support.execute_until_empty(self.taskqueue)
 
-    entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, "http://cloudysunny14.html"))
+    entities = CrawlDbDatum.query(CrawlDbDatum.url=="http://cloudysunny14.html").fetch()
     entity = entities[0]
-    fetched_datums = FetchedDatum.fetch_fetched_datum(entity.key)
-    fetched_datum = fetched_datums[0]
+    fetched_datum = FetchedDatum.get_by_id(entity.url)
     self.assertTrue(fetched_datum!=None)
     qry = CrawlDbDatum.query(CrawlDbDatum.last_status == pipelines.UNFETCHED)
     crawl_db_datums = qry.fetch()
@@ -499,16 +481,16 @@ class CleanPipelineTest(testutil.HandlerTestBase):
     p.start()
     test_support.execute_until_empty(self.taskqueue)
 
-    entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, "http://foo.html"))
+    entities = CrawlDbDatum.query(CrawlDbDatum.url== "http://foo.html").fetch()
     self.assertEquals(0, len(entities))
-    entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, "http://bar.html"))
+    entities = CrawlDbDatum.query(CrawlDbDatum.url== "http://bar.html").fetch()
     self.assertEquals(0, len(entities))
-    entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, "http://faz.html"))
+    entities = CrawlDbDatum.query(CrawlDbDatum.url== "http://faz.html").fetch()
     self.assertEquals(1, len(entities))
     entity = entities[0]
-    fetched_datums = FetchedDatum.fetch_fetched_datum(entity.key)
-    self.assertEquals(0, len(fetched_datums))
-    entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, "http://baz.html"))
+    fetched_datum = FetchedDatum.get_by_id(entity.url)
+    self.assertTrue(fetched_datum is None)
+    entities = CrawlDbDatum.query(CrawlDbDatum.url=="http://baz.html").fetch()
     self.assertEquals(1, len(entities))
     entity = entities[0]
 

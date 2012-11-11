@@ -259,6 +259,13 @@ def _makeFetchSetBufferMap(binary_record):
   proto.ParseFromString(binary_record)
   extract_domain_url = proto.key()
   content = proto.value()
+  #Extract urls from CrawlDbDatum.
+  try:
+    query = CrawlDbDatum.query(CrawlDbDatum.extract_domain_url==extract_domain_url)
+    crawl_datum_future = query.fetch_async()
+  except Exception as e:
+    logging.warning("Fetch error occurs from CrawlDbDatum" + e.message)
+
   filtered_domain_list = url_filter_yaml.domain_urlfilter
   can_fetch = False
   #Get the fetcher policy from resource.
@@ -267,29 +274,20 @@ def _makeFetchSetBufferMap(binary_record):
   try:
     rp.parse(content.split("\n").__iter__())
   except Exception as e:
-    logging.warning("RobotFileParser raises exception:" + e.message)
-  
-  #Extract urls from CrawlDbDatum.
-  entities = []
-  try:
-    query = CrawlDbDatum.query(CrawlDbDatum.extract_domain_url==extract_domain_url)
-    entities = query.fetch()
-  except Exception as e:
-    logging.warning("Fetch error occurs from CrawlDbDatum" + e.message)
-
-  for entity in entities:
-    url = entity.url
+    logging.warning("RobotFileParser raises exception:" + e.message) 
+   
+  for crawl_datum in crawl_datum_future.get_result():
+    url = crawl_datum.url
     try:
       can_fetch = rp.can_fetch(user_agent, url)
     except Exception as e:
       logging.warning("RobotFileParser raises exception:" + e.message)
       url = ""
-
     # If extract_domain_url was contains filtered_domain_urls,
     # all url don't fetch, which belong to filtered domain. 
     if extract_domain_url in filtered_domain_list:
       can_fetch = False
-
+    
     yield (url, can_fetch)
 
 class _FetchSetsBufferPipeline(base_handler.PipelineBase):
@@ -339,31 +337,29 @@ def _fetchMap(binary_record):
   crawl_db_datum = None
   #Fetch to CrawlDbDatum
   try:
-    crawl_db_datums = CrawlDbDatum.fetch_crawl_db_from_url(url)
-    crawl_db_datum = crawl_db_datums[0]
+    query = CrawlDbDatum.query(CrawlDbDatum.url==url)
+    crawl_db_datum_future = query.fetch_async() 
   except Exception as e:
     logging.warning("Failed create key, caused by invalid url:" + url + ":" + e.message)
     could_fetch = False
-
+  
   if could_fetch:
     #start fetch    
     fetcher = fetchers.SimpleHttpFetcher(1, fetcher_policy_yaml.fetcher_policy)
     try:
       fetch_result = fetcher.get(url)
-      if fetch_result:
+      crawl_db_datums = crawl_db_datum_future.get_result()
+      crawl_db_datum = crawl_db_datums[0]
+      if fetch_result and crawl_db_datum is not None:
         #Storing to datastore
-        fetched_datum = FetchedDatum(
-            parent=crawl_db_datum.key,
-            url = url,
-            fetched_url = fetch_result.get("fetched_url"),
-            fetch_time = fetch_result.get("time"),
-            content_text = fetch_result.get("content_text"),
+        FetchedDatum.get_or_insert(url,
+            url=url, fetched_url = fetch_result.get("fetched_url"),
+            fetch_time = fetch_result.get("time"), content_text = fetch_result.get("content_text"),
             content_binary = fetch_result.get("content_binary"),
             content_type =  fetch_result.get("mime_type"),
             content_size = fetch_result.get("read_rate"),
             response_rate = fetch_result.get("read_rate"),
             http_headers = str(fetch_result.get("headers")))
-        fetched_datum.put()
         #update time of last fetched 
         crawl_db_datum.last_fetched = datetime.datetime.now()
         result = FETCHED
@@ -373,14 +369,10 @@ def _fetchMap(binary_record):
       result = FAILED
   else:
     result = FAILED
-  
+
   if crawl_db_datum is not None:
-    #update the crawlDbDatum's status
-    for entity in crawl_db_datums:
-      entity.last_updated = datetime.datetime.now()
-      entity.last_status = result
-    #update entities
-    ndb.put_multi(crawl_db_datums)
+    crawl_db_datum.last_status = result
+    crawl_db_datum.put()
   
   yield fetched_url
 
@@ -466,16 +458,16 @@ def _extract_outlinks_map(data):
     url: The page url.
   """
   k, url = data
-  entities = CrawlDbDatum.fetch_crawl_db_from_url(url)
-  for entity in entities:
-    fetched_datums = FetchedDatum.fetch_fetched_datum(entity.key)
-    content = None
-    if len(fetched_datums)>0:
-      content = fetched_datums[0].content_text
-      if not content:
-        content = fetched_datums[0].content_binary
+  query = CrawlDbDatum.query(CrawlDbDatum.url==url)
+  fetched_datum = FetchedDatum.get_by_id(url)
+  content = None
+  if fetched_datum is not None:
+    entity_future = query.fetch_async(limit=1)
+    content = fetched_datum.content_text
+    if not content:
+      content = fetched_datum.content_binary
 
-      mime_type = fetched_datums[0].content_type
+    mime_type = fetched_datum.content_type
     if content is not None:
       parsed_obj = None
       try:
@@ -483,11 +475,11 @@ def _extract_outlinks_map(data):
         parsed_obj = util.handler_for_name(params[mime_type])(content)
       except Exception as e:
         logging.warning("Can not handle for %s[params:%s]:%s"%(mime_type, params, e.message))
-        continue
-
+        #continue
+      entities = entity_future.get_result()
+      entity = entities[0]
       crawl_depth = entity.crawl_depth
       crawl_depth += 1
-      outlinks_datums = []
       try:
         for extract_url in parsed_obj:
           parsed_uri = urlparse(extract_url)
@@ -497,18 +489,11 @@ def _extract_outlinks_map(data):
   
           if parsed_uri.scheme == "http" or parsed_uri.scheme == "https":
             #If parsed outlink url has existing in datum, not put.
-            temp_crawldatums = CrawlDbDatum.fetch_crawl_db_from_url(extract_url)
-            if len(temp_crawldatums) == 0:
-              crawl_db_datum = CrawlDbDatum(
-                  parent=ndb.Key(CrawlDbDatum, url),
-                  url=extract_url,
-                  last_status=UNFETCHED,
-                  crawl_depth=crawl_depth)
-              outlinks_datums.append(crawl_db_datum)
+            CrawlDbDatum.get_or_insert(extract_url, parent=ndb.Key(CrawlDbDatum, url),
+                url=extract_url, last_status=UNFETCHED, crawl_depth=crawl_depth)
       except Exception as e:
         logging.warning("Parsed object is not outlinks iter:"+e.message)
-      #Put all extracted outlinks
-      ndb.put_multi(outlinks_datums)
+      
 
   yield url+"\n"
 
@@ -579,10 +564,9 @@ def _page_index_map(crawl_db_datum):
   except Exception as e:
     logging.warning("Can't index this url:"+e.message)
 
-  fetched_datums = FetchedDatum.fetch_fetched_datum(crawl_db_datum.key)
+  fetched_datum = FetchedDatum.get_by_id(url_str)
   index_name = INDEX_NAME+"_"+str(_get_index_num()%INDEX_NUM)
-  if len(fetched_datums) > 0 and len(url_str) > 0:
-    fetched_datum = fetched_datums[0]
+  if fetched_datum is not None:
     content = fetched_datum.content_text
     
     doc = search.Document(
@@ -644,21 +628,22 @@ def _page_scoring_map(binary_record):
   proto.ParseFromString(binary_record)
   url = proto.key()
   index_name = proto.value()
-  crawl_db_datums = []
+  crawl_db_datum = None
   try:
-    crawl_db_datums = CrawlDbDatum.fetch_crawl_db_from_url(url)
+    query = CrawlDbDatum.query(CrawlDbDatum.url==url)
+    crawl_db_datums = query.fetch()
   except Exception as e:
     logging.warning("Extract crawldb from datastore error occurs:"+e.message)
 
   score = 0.0
-  if len(crawl_db_datums)>0:
-    for entity in crawl_db_datums: 
-      last_status = entity.last_status
-      # Update the status of the status SKIPPED,
-      # if the url's parent page is not preferenced page.
-      status_changed = False
+  if crawl_db_datums is not None:
+    # Update the status of the status SKIPPED,
+    # if the url's parent page is not preferenced page.
+    status_changed = False
+    for crawl_db_datum in crawl_db_datums:
+      last_status = crawl_db_datum.last_status
       if last_status == UNFETCHED:
-        entity.last_status = SKIPPED
+        crawl_db_datum.last_status = SKIPPED
         status_changed = True
     # Target crawl_db_datum of scoring is one of the crawl_db_datums.
     crawl_db_datum = crawl_db_datums[0]
@@ -684,11 +669,11 @@ def _page_scoring_map(binary_record):
           score = scored_document.sort_scores[0] 
           if score >= float(adopt_score):
             #Update the status of the link, that extracted from the scored page.
-            entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, url))
-            for entity in entities:
-              if entity.last_status == UNFETCHED or entity.last_status == SKIPPED:
-                entity.last_status = SCORED_PAGE_LINK
-                entity.put()
+            crawl_db_links = CrawlDbDatum.query(ancestor=ndb.Key(CrawlDbDatum, url)).fetch()
+            for link in crawl_db_links:
+              if link.last_status == UNFETCHED or link.last_status == SKIPPED:
+                link.last_status = SCORED_PAGE_LINK
+                link.put()
     except search.Error:
       logging.warning("Scorering failed:"+url)
     
@@ -762,7 +747,12 @@ def _clean_map(crawl_db_datum):
   Returns:
     url_str: Deleted urls.
   """
-  delete_keys =  FetchedDatum.fetch_fetched_datum(crawl_db_datum.key, keys_only=True)
+  delete_keys = []
+  clean_all = memcache.get(CLEAN_ALL_KEY)
+  delete_fetched_datum =  FetchedDatum.get_by_id(crawl_db_datum.url)
+  if delete_fetched_datum is not None:
+    delete_keys.append(delete_fetched_datum.key)
+
   data = ndb.Model.to_dict(crawl_db_datum)
   fetch_status = data.get("last_status", 2)
   url=""

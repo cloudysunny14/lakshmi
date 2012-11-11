@@ -19,7 +19,6 @@ import unittest
 import time
 import re
 
-from google.appengine.ext import ndb
 from google.appengine.api import apiproxy_stub
 from mapreduce.lib import pipeline
 from mapreduce import test_support
@@ -30,13 +29,9 @@ from lakshmi.datum import FetchedDatum
 
 def createMockCrawlDbDatum(url):
     """Create CrawlDbDatum mock data."""
-    data = CrawlDbDatum(
-        parent =ndb.Key(CrawlDbDatum, url),
-        url=url,
-        last_status=pipelines.UNFETCHED,
-        crawl_depth=0)
-    data.put()
-
+    CrawlDbDatum.get_or_insert(url,
+        url=url, last_status=pipelines.UNFETCHED, crawl_depth=0)
+    
 class URLFetchServiceMockForUrl(apiproxy_stub.APIProxyStub):
   """Mock for google.appengine.api.urlfetch."""
   def __init__(self, service_name="urlfetch"):
@@ -126,11 +121,10 @@ class FetchPipelineEndtoEndTest(testutil.HandlerTestBase):
     p.start()
     test_support.execute_until_empty(self.taskqueue)
     
-    entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, "http://foo.com/bar.html"))
+    entities = CrawlDbDatum.query(CrawlDbDatum.url=="http://foo.com/bar.html").fetch()
     entity = entities[0]
-    fetched_datums = FetchedDatum.fetch_fetched_datum(entity.key)
-    fetched_datum = fetched_datums[0]
-    self.assertTrue(fetched_datum!=None)
+    fetched_datum = FetchedDatum.get_by_id(entity.url)
+    self.assertTrue(fetched_datum is not None)
     qry = CrawlDbDatum.query(CrawlDbDatum.last_status == pipelines.UNFETCHED)
     crawl_db_datums = qry.fetch()
     self.assertTrue(len(crawl_db_datums)>0)
@@ -223,10 +217,10 @@ class FetchPipelineFilteredDomainTest(testutil.HandlerTestBase):
         shards=2)
     p.start()
     test_support.execute_until_empty(self.taskqueue)
-    entities = CrawlDbDatum.fetch_crawl_db(ndb.Key(CrawlDbDatum, "http://appengine.google.com/bar.txt"))
+    entities = CrawlDbDatum.query(CrawlDbDatum.url=="http://appengine.google.com/bar.txt").fetch()
     entity = entities[0]
-    fetched_datums = FetchedDatum.fetch_fetched_datum(entity.key)
-    self.assertEquals(0, len(fetched_datums))    
+    fetched_datum = FetchedDatum.get_by_id(entity.url)
+    self.assertTrue(fetched_datum is None)    
 
 if __name__ == "__main__":
   unittest.main()
