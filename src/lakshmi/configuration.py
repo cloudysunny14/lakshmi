@@ -150,9 +150,10 @@ class FetcherPolicyInfo(validation.Validated):
     "redirect_mode": validation.Options(FOLLOW_ALL,
                                 FOLLOW_NONE,
                                 default=FOLLOW_ALL),
-    "request_timeout": r".+"
+    "request_timeout": r".+",
+    "max_links_per_page": "[0-9]+"
   }
-  
+ 
 class FetcherPolicyYaml(validation.Validated):
   """Root class for fetcher_policy.yaml.
 
@@ -171,6 +172,7 @@ class FetcherPolicyYaml(validation.Validated):
     valid_mime_types: None
     redirect_mode: follow
     request_timeout: 20000
+    max_links_per_page: 10
 
   Where
     fetcher_policy: The fetcher policy root.
@@ -191,6 +193,7 @@ class FetcherPolicyYaml(validation.Validated):
         FOLLOW_TEMP: Temp redirects are automatically followed, but not pemanent.
         FOLLOW_NONE: No redirects are followed.
     request_timeout: timeout fetch job.
+    max_links_per_page: The max number of extract links per page.
   """
 
   ATTRIBUTES = {
@@ -228,7 +231,8 @@ class FetcherPolicyYaml(validation.Validated):
       "accept_language": fetcher_policy.accept_language,
       "valid_mime_types": fetcher_policy.valid_mime_types,
       "redirect_mode": fetcher_policy.redirect_mode,
-      "request_timeout": fetcher_policy.request_timeout
+      "request_timeout": fetcher_policy.request_timeout,
+      "max_links_per_page": fetcher_policy.max_links_per_page
     }
     max_content_sizes = fetcher_policy_yaml.fetcher_policy.max_content_size
     if max_content_sizes:

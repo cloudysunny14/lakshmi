@@ -480,6 +480,7 @@ def _extract_outlinks_map(data):
       entity = entities[0]
       crawl_depth = entity.crawl_depth
       crawl_depth += 1
+      memcache.set(key=url, value=0)
       try:
         for extract_url in parsed_obj:
           parsed_uri = urlparse(extract_url)
@@ -488,6 +489,11 @@ def _extract_outlinks_map(data):
             continue
   
           if parsed_uri.scheme == "http" or parsed_uri.scheme == "https":
+            link_count = memcache.incr(url)
+            max_links_per_page = int(fetcher_policy_yaml.fetcher_policy.max_links_per_page)
+            #Break the loop when exceeds the set value. 
+            if max_links_per_page and link_count > max_links_per_page:
+              break
             #If parsed outlink url has existing in datum, not put.
             CrawlDbDatum.get_or_insert(extract_url, parent=ndb.Key(CrawlDbDatum, url),
                 url=extract_url, last_status=UNFETCHED, crawl_depth=crawl_depth)
@@ -660,6 +666,7 @@ def _page_scoring_map(binary_record):
     query_str = score_config_yaml.score_config.score_query
     adopt_score = score_config_yaml.score_config.adopt_score
     query = search.Query(query_string=query_str, options=options)
+    scored_links = []
     try:
       results = search.Index(name=index_name).search(query)
       for scored_document in results.results:
@@ -671,9 +678,10 @@ def _page_scoring_map(binary_record):
             #Update the status of the link, that extracted from the scored page.
             crawl_db_links = CrawlDbDatum.query(ancestor=ndb.Key(CrawlDbDatum, url)).fetch()
             for link in crawl_db_links:
-              if link.last_status == UNFETCHED or link.last_status == SKIPPED:
+              if link.last_status in (UNFETCHED, SKIPPED) and not link.url in scored_links:
                 link.last_status = SCORED_PAGE_LINK
                 link.put()
+                scored_links.append(link.url)
     except search.Error:
       logging.warning("Scorering failed:"+url)
     

@@ -95,7 +95,8 @@ class FetcherPolicyYamlTest(unittest.TestCase):
         "  accept_language: en-us,en-gb,en;q=0.7,*;q=0.3\n"
         "  valid_mime_types: text/html\n"
         "  redirect_mode: follow_all\n"
-        "  request_timeout: 20000\n")
+        "  request_timeout: 20000\n"
+        "  max_links_per_page: 10")
 
     self.assertTrue(fetcher_policy_yaml)
     self.assertTrue("test", fetcher_policy_yaml.fetcher_policy.agent_name)
@@ -116,6 +117,7 @@ class FetcherPolicyYamlTest(unittest.TestCase):
     self.assertEquals("text/html", fetcher_policy_yaml.fetcher_policy.valid_mime_types)
     self.assertEquals("follow_all", fetcher_policy_yaml.fetcher_policy.redirect_mode)
     self.assertEquals("20000", fetcher_policy_yaml.fetcher_policy.request_timeout)
+    self.assertEquals("10", fetcher_policy_yaml.fetcher_policy.max_links_per_page)
 
   def testParseMissingRequiredAttrs(self):
     """Test parsing with missing required attributes."""
@@ -165,7 +167,8 @@ class FetcherPolicyYamlTest(unittest.TestCase):
         "  accept_language: en-us,en-gb,en;q=0.7,*;q=0.3\n"
         "  valid_mime_types: text/html\n"
         "  redirect_mode: follow_all\n"
-        "  request_timeout: 20\n")
+        "  request_timeout: 20\n"
+        "  max_links_per_page: 10\n")
     all_configs = configuration.FetcherPolicyYaml.to_dict(fp_yaml)
     self.assertEquals(
       {
@@ -183,7 +186,8 @@ class FetcherPolicyYamlTest(unittest.TestCase):
             'accept_language': "en-us,en-gb,en;q=0.7,*;q=0.3",
             'valid_mime_types': "text/html",
             'redirect_mode': "follow_all",
-            'request_timeout': "20"
+            'request_timeout': "20",
+            'max_links_per_page': "10"
       }, all_configs)
 
 class ScoreConfigYamlTest(unittest.TestCase):

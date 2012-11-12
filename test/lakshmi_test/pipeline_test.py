@@ -447,7 +447,7 @@ class ExtractOutlinksPipelineTest(testutil.HandlerTestBase):
     self.assertTrue(fetched_datum!=None)
     qry = CrawlDbDatum.query(CrawlDbDatum.last_status == pipelines.UNFETCHED)
     crawl_db_datums = qry.fetch()
-    self.assertTrue(len(crawl_db_datums)>0)
+    self.assertEquals(10,len(crawl_db_datums))
     for crawl_db_datum in crawl_db_datums:
       self.assertEquals(1, crawl_db_datum.crawl_depth)
 
