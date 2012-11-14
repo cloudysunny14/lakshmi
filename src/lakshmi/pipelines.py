@@ -334,7 +334,7 @@ def _fetchMap(binary_record):
   could_fetch = _str2bool(proto.value())
   result = UNFETCHED
   fetched_url = ""
-  crawl_db_datum = None
+  fetch_date = None
   #Fetch to CrawlDbDatum
   try:
     query = CrawlDbDatum.query(CrawlDbDatum.url==url)
@@ -348,9 +348,7 @@ def _fetchMap(binary_record):
     fetcher = fetchers.SimpleHttpFetcher(1, fetcher_policy_yaml.fetcher_policy)
     try:
       fetch_result = fetcher.get(url)
-      crawl_db_datums = crawl_db_datum_future.get_result()
-      crawl_db_datum = crawl_db_datums[0]
-      if fetch_result and crawl_db_datum is not None:
+      if fetch_result:
         #Storing to datastore
         FetchedDatum.get_or_insert(url,
             url=url, fetched_url = fetch_result.get("fetched_url"),
@@ -361,19 +359,22 @@ def _fetchMap(binary_record):
             response_rate = fetch_result.get("read_rate"),
             http_headers = str(fetch_result.get("headers")))
         #update time of last fetched 
-        crawl_db_datum.last_fetched = datetime.datetime.now()
         result = FETCHED
+        fetch_date = datetime.datetime.now()
         fetched_url = ("%s\n"%url)
     except Exception as e:
       logging.warning("Fetch Error Occurs:" + e.message)
       result = FAILED
   else:
     result = FAILED
-
-  if crawl_db_datum is not None:
-    crawl_db_datum.last_status = result
-    crawl_db_datum.put()
   
+  #Update status to all datums.
+  crawl_db_datums = crawl_db_datum_future.get_result()
+  for datum in crawl_db_datums:
+    datum.last_status = result
+    datum.last_fetched = fetch_date
+  ndb.put_multi(crawl_db_datums)
+
   yield fetched_url
 
 class _FetchPipeline(base_handler.PipelineBase):
@@ -489,18 +490,18 @@ def _extract_outlinks_map(data):
             continue
   
           if parsed_uri.scheme == "http" or parsed_uri.scheme == "https":
-            link_count = memcache.incr(url)
-            max_links_per_page = int(fetcher_policy_yaml.fetcher_policy.max_links_per_page)
-            #Break the loop when exceeds the set value. 
-            if max_links_per_page and link_count > max_links_per_page:
-              break
             #If parsed outlink url has existing in datum, not put.
-            CrawlDbDatum.get_or_insert(extract_url, parent=ndb.Key(CrawlDbDatum, url),
+            crawl_db_datum = CrawlDbDatum.insert_or_fail(extract_url, parent=ndb.Key(CrawlDbDatum, url),
                 url=extract_url, last_status=UNFETCHED, crawl_depth=crawl_depth)
+            if crawl_db_datum is not None:
+              link_count = memcache.incr(url)
+              max_links_per_page = int(fetcher_policy_yaml.fetcher_policy.max_links_per_page)
+              #Break the loop when exceeds the set value. 
+              if max_links_per_page and link_count >= max_links_per_page:
+                break
       except Exception as e:
         logging.warning("Parsed object is not outlinks iter:"+e.message)
       
-
   yield url+"\n"
 
 class _ExtractOutlinksPipeline(base_handler.PipelineBase):

@@ -44,6 +44,16 @@ class CrawlDbDatum(ndb.Model):
   @classmethod
   def kind(cls):
     return "CrawlDbDatum"
+
+  @classmethod
+  @ndb.transactional
+  def insert_or_fail(cls, id_or_keyname, **kwds):
+    entity = cls.get_by_id(id=id_or_keyname, parent=kwds.get('parent'))
+    if entity is None:
+      entity = cls(id=id_or_keyname, **kwds)
+      entity.put()
+      return entity
+    return None
   
 class FetchedDatum(ndb.Model):
   """Hold the fetched result.
