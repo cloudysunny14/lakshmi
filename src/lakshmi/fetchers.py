@@ -244,7 +244,7 @@ class SimpleHttpFetcher(FetcherBase):
 
     return {"url": fetch_url,
             "fetched_url": fetched_url,
-            "time": self._time(),
+            "time": self._time() - self._read_start_time,
             "content_text": content_text,
             "content_binary": content_binary,
             "content_length": int(target_length),

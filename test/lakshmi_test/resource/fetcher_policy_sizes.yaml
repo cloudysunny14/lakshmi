@@ -15,3 +15,4 @@ fetcher_policy:
   valid_mime_types: text/html,image/png
   redirect_mode: follow_all
   request_timeout: 20000
+  max_links_per_page: 10
