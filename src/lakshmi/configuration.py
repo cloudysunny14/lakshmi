@@ -458,13 +458,17 @@ class UrlFilterYaml(validation.Validated):
 
   domain_urlfilter:
     - http://hoge.com
+  urlfilter:
+    - http://hoge.com/fuga/
     
   Where
-    domain_urlfilter: The filter target url list root.
+    domain_urlfilter: The filter target domain list root.
+    url_filter: The filter target url list root.
   """
 
   ATTRIBUTES = {
-      "domain_urlfilter": validation.Optional(list)
+      "domain_urlfilter": validation.Optional(list),
+      "urlfilter": validation.Optional(list)
   }
   
   @classmethod
@@ -488,6 +492,7 @@ class UrlFilterYaml(validation.Validated):
     """
     out = {
       "domain_urlfilter": url_filter_yaml.domain_urlfilter,
+      "urlfilter": url_filter_yaml.urlfilter
     }
 
     return out

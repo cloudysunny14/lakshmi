@@ -439,6 +439,7 @@ class FetcherPipeline(base_handler.PipelineBase):
       yield mapper_pipeline._CleanupPipeline(all_temp_files)
 
 _PARSER_PARAM_KEY = "PARSER_PARAM_KEY"
+url_filter_yaml = configuration.UrlFilterYaml.create_default_urlfilter()
 
 def _set_parser_param(key, params):
   memcache.set(key, params)
@@ -462,6 +463,7 @@ def _extract_outlinks_map(data):
   query = CrawlDbDatum.query(CrawlDbDatum.url==url)
   fetched_datum = FetchedDatum.get_by_id(url)
   content = None
+  exempt_links = url_filter_yaml.urlfilter
   if fetched_datum is not None:
     entity_future = query.fetch_async(limit=1)
     content = fetched_datum.content_text
@@ -476,19 +478,24 @@ def _extract_outlinks_map(data):
         parsed_obj = util.handler_for_name(params[mime_type])(content)
       except Exception as e:
         logging.warning("Can not handle for %s[params:%s]:%s"%(mime_type, params, e.message))
-        #continue
+      
       entities = entity_future.get_result()
       entity = entities[0]
       crawl_depth = entity.crawl_depth
       crawl_depth += 1
       memcache.set(key=url, value=0)
       try:
-        for extract_url in parsed_obj:
-          parsed_uri = urlparse(extract_url)
-          # To use url as a key, requires to string size is lower to 500 characters.
+        for extract_url in parsed_obj: 
           if len(extract_url) > 500:
+            # To use url as a key, requires to string size is lower to 500 characters.
+            logging.warning("Can not use as a key:"+extract_url)
             continue
-  
+          elif exempt_links is not None and extract_url in exempt_links:
+            # Filtered url have extracted.
+            logging.warning("Filtered url:"+extract_url)
+            continue
+
+          parsed_uri = urlparse(extract_url)
           if parsed_uri.scheme == "http" or parsed_uri.scheme == "https":
             #If parsed outlink url has existing in datum, not put.
             crawl_db_datum = CrawlDbDatum.insert_or_fail(extract_url, parent=ndb.Key(CrawlDbDatum, url),

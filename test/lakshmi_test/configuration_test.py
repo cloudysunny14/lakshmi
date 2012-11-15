@@ -346,21 +346,27 @@ class UrlFilterYamlTest(unittest.TestCase):
     url_filter_yaml = configuration.parse_url_filter_yaml(
         "domain_urlfilter:\n"
         "  - http://foo.com\n"
-        "  - http://bar.com\n")
+        "  - http://bar.com\n"
+        "urlfilter:\n"
+        "  - http://foo.com/bar/\n")
 
     self.assertTrue(url_filter_yaml)
     self.assertTrue(str(["http://foo.com", "http://bar.com"]), str(url_filter_yaml.domain_urlfilter))
+    self.assertTrue(str(["http://foo.com/bar/"]), str(url_filter_yaml.urlfilter))
 
   def testToDict(self):
     """Tests encoding the UF document as JSON."""
     uf_yaml = configuration.parse_url_filter_yaml(
         "domain_urlfilter:\n"
         "  - http://foo.com\n"
-        "  - http://bar.com\n")
+        "  - http://bar.com\n"
+        "urlfilter:\n"
+        "  - http://foo.com/bar/\n")
     all_configs = configuration.UrlFilterYaml.to_dict(uf_yaml)
     self.assertEquals(
       {
             "domain_urlfilter": ["http://foo.com", "http://bar.com"],
+            "urlfilter": ["http://foo.com/bar/"]
       }, all_configs)
 
 if __name__ == "__main__":
