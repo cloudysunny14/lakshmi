@@ -21,4 +21,19 @@ Cloud Storage in CSV format, then starts another pipeline that
 creates a other service's ingestion job.
 """
 
+from mapreduce import base_handler
 
+class ExportCloudStoragePipeline(base_handler.PipelineBase):
+  """Pipeline to export to cloud storage.
+
+  Args:
+    job_name: job name as string.
+    params: parameters for DatastoreInputReader,
+      that params use to CrawlDbDatum.
+    shard_count: shard count for mapreduce.
+
+  Returns:
+    file_names: output path of score results.
+  """
+
+  
