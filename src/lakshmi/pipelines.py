@@ -285,7 +285,7 @@ def _makeFetchSetBufferMap(binary_record):
       url = ""
     # If extract_domain_url was contains filtered_domain_urls,
     # all url don't fetch, which belong to filtered domain. 
-    if extract_domain_url in filtered_domain_list:
+    if filtered_domain_list and extract_domain_url in filtered_domain_list:
       can_fetch = False
     
     yield (url, can_fetch)
