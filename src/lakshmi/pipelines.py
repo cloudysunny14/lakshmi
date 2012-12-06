@@ -17,6 +17,7 @@
 import logging
 import robotparser
 import datetime
+import re
 
 from mapreduce.lib.files import file_service_pb
 
@@ -464,6 +465,7 @@ def _extract_outlinks_map(data):
   fetched_datum = FetchedDatum.get_by_id(url)
   content = None
   exempt_links = url_filter_yaml.urlfilter
+  regex_filter_links = url_filter_yaml.regex_urlfilter
   if fetched_datum is not None:
     entity_future = query.fetch_async(limit=1)
     content = fetched_datum.content_text
@@ -493,6 +495,11 @@ def _extract_outlinks_map(data):
           elif exempt_links is not None and extract_url in exempt_links:
             # Filtered url have extracted.
             logging.warning("Filtered url:"+extract_url)
+            continue
+          elif regex_filter_links is not None and True in map(lambda l:
+            bool(re.search(l, extract_url)), regex_filter_links):
+            # Regex Filtered url.
+            logging.warning("Regex Filtered url:"+extract_url)
             continue
 
           parsed_uri = urlparse(extract_url)
@@ -672,7 +679,6 @@ def _page_scoring_map(binary_record):
         returned_fields=['url'],
         snippeted_fields=['content'])
     query_str = score_config_yaml.score_config.score_query
-    adopt_score = score_config_yaml.score_config.adopt_score
     query = search.Query(query_string=query_str, options=options)
     scored_links = []
     try:
@@ -682,14 +688,13 @@ def _page_scoring_map(binary_record):
         url_field = scored_document.fields[0]
         if url_field.value == url and len(scored_document.sort_scores)>0:
           score = scored_document.sort_scores[0] 
-          if score >= float(adopt_score):
-            #Update the status of the link, that extracted from the scored page.
-            crawl_db_links = CrawlDbDatum.query(ancestor=ndb.Key(CrawlDbDatum, url)).fetch()
-            for link in crawl_db_links:
-              if link.last_status in (UNFETCHED, SKIPPED) and not link.url in scored_links:
-                link.last_status = SCORED_PAGE_LINK
-                link.put()
-                scored_links.append(link.url)
+          #Update the status of the link, that extracted from the scored page.
+          crawl_db_links = CrawlDbDatum.query(ancestor=ndb.Key(CrawlDbDatum, url)).fetch()
+          for link in crawl_db_links:
+            if link.last_status in (UNFETCHED, SKIPPED) and not link.url in scored_links:
+              link.last_status = SCORED_PAGE_LINK
+              link.put()
+              scored_links.append(link.url)
     except search.Error:
       logging.warning("Scorering failed:"+url)
     

@@ -2,3 +2,5 @@ domain_urlfilter:
   - http://appengine.google.com #ignore links domain.
 urlfilter:
   - http://appengine.google.com/cloudysunny14/ #ignore links url.
+regex_urlfilter:
+  - http://appengine.google.com/cloudysunny14/tag/.+

@@ -223,7 +223,8 @@ class FetchPipelineFilteredDomainTest(testutil.HandlerTestBase):
 
 def _htmlFixOutlinkParser(content):
   "htmlOutlinkParser for testing"
-  return ["http://appengine.google.com/cloudysunny14/"] 
+  return ["http://appengine.google.com/cloudysunny14/", "http://appengine.google.com/cloudysunny14/tag/content",
+      "http://appengine.google.com/cloudysunny14/dummy_content"] 
 
 class FetchPipelineFilteredURLTest(testutil.HandlerTestBase):
   """Test for FetchPipeline"""
@@ -268,7 +269,7 @@ class FetchPipelineFilteredURLTest(testutil.HandlerTestBase):
     
     qry = CrawlDbDatum.query(CrawlDbDatum.last_status == pipelines.UNFETCHED)
     crawl_db_datums = qry.fetch()
-    self.assertEquals(0,len(crawl_db_datums))
+    self.assertEquals(1,len(crawl_db_datums))
 
 if __name__ == "__main__":
   unittest.main()
