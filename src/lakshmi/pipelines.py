@@ -681,7 +681,8 @@ def _page_scoring_map(binary_record):
         # process scored_document
         url_field = scored_document.fields[0]
         if url_field.value == url and len(scored_document.sort_scores)>0:
-          score = scored_document.sort_scores[0] 
+          logging.debug(str(scored_document.sort_scores))
+          score = max(scored_document.sort_scores)
           if score >= float(adopt_score):
             #Update the status of the link, that extracted from the scored page.
             crawl_db_links = CrawlDbDatum.query(ancestor=ndb.Key(CrawlDbDatum, url)).fetch()
