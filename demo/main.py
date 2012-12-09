@@ -30,12 +30,13 @@ from mapreduce import base_handler
 from lakshmi import pipelines
 from lakshmi import configuration
 from lakshmi.datum import CrawlDbDatum
+from lakshmi.cooperate import cooperate
 
 ENTITY_KIND = "lakshmi.datum.CrawlDbDatum"
 #specified some urls
 ROOT_URLS = ["http://www.python.org/"]
 
-
+#Create Datum Handlers
 class AddRootUrlsHandler(webapp.RequestHandler):
   def get(self):
     self.response.headers['Content-Type'] = 'text/plain'
@@ -51,9 +52,21 @@ class AddRootUrlsHandler(webapp.RequestHandler):
 
     self.response.out.write("SETTING %d ROOT URL IS SUCCESS"%insert_num)
 
+#lakshmi pipeline Handlers
+import random
+
 def _htmlOutlinkParser(content):
-  """htmlOutlinkParser for testing"""
-  return re.findall(r'href=[\'"]?([^\'" >]+)', "".join(content))
+  "htmlOutlinkParser for ramdam extracting"
+  link_list = re.findall(r'href=[\'"]?([^\'" >]+)', content)
+  while link_list:
+    if link_list != []:
+      index = random.randint(0, len(link_list) - 1)
+      elem = link_list[index]
+      link_list[index] = link_list[-1]
+      del link_list[-1]
+      yield elem
+    else:
+      yield link_list
 
 class FetchStart(webapp.RequestHandler):
   def get(self):
@@ -105,8 +118,15 @@ class RemoveIndex(base_handler.PipelineBase):
         if not document_ids:
           break
         # Remove the documents for the given ids from the Index.
-        doc_index.delete(document_ids)
-    
+        doc_index.remove(document_ids)
+
+class RemoveDoc(webapp.RequestHandler):
+  def get(self):
+    pipeline = RemoveIndex(None)
+    pipeline.start()
+    path = pipeline.base_path + "/status?root=" + pipeline.pipeline_id
+    self.redirect(path)
+
 class ScoreHandler(webapp.RequestHandler):
   def get(self):
     pipeline = ScorePipeline(ENTITY_KIND)
@@ -140,13 +160,29 @@ class CleanHandler(webapp.RequestHandler):
     path = pipeline.base_path + "/status?root=" + pipeline.pipeline_id
     self.redirect(path)
 
+#Cooperate Handlers
+FETCHED_DATUM_ENTITY_KIND = "lakshmi.datum.FetchedDatum"
+GS_BUCKET = "your_bucket_name"
+
+class ExportHandler(webapp.RequestHandler):
+  def get(self):
+    pipeline = cooperate.ExportCloudStoragePipeline("ExportCloudStoragePipeline",
+        input_entity_kind="lakshmi.datum.FetchedDatum",
+        gs_bucket_name=GS_BUCKET,
+        shards=3)
+    pipeline.start()
+    path = pipeline.base_path + "/status?root=" + pipeline.pipeline_id
+    self.redirect(path)
+
 application = webapp.WSGIApplication(
                                      [("/start", FetchStart),
                                      ("/add_data", AddRootUrlsHandler),
                                      ("/clean_all", DeleteDatumHandler),
                                      ("/score", ScoreHandler),
                                      ("/refetch", ReFetch),
-                                     ("/clean", CleanHandler)],
+                                     ("/clean", CleanHandler),
+                                     ("/remove_doc", RemoveDoc),
+                                     ("/export", ExportHandler)],
                                      debug=True)
                                      
 def main():
