@@ -52,6 +52,16 @@ def clean_html(html):
   cleaned = re.sub(r"  ", " ", cleaned)
   return cleaned.strip()
 
+def _extract_title(html):
+  html_lowered = html.lower();
+  begin = html_lowered.find('<title>')
+  end = html_lowered.find('</title>')
+  if begin == -1 or end == -1:
+    return "No Title"
+  else:
+    # Find in the original html
+    return html[begin+len('<title>'):end].strip()
+
 def _to_csv_map(entity_type):
   """Map function of parse contents and 
     create CSV format text.
@@ -65,11 +75,13 @@ def _to_csv_map(entity_type):
   data = ndb.Model.to_dict(entity_type)
   content = data.get("content_text", None)
   result = []
+  title = ""
   if content is not None:
+    title = _extract_title(content)
     cleaned_content = clean_html(content.replace(",", ""))
     result = filter(lambda l: " ".join(l.split()), cleaned_content.splitlines())
 
-  csv_format_text = (",").join((data.get("url", ""), "".join(result)))
+  csv_format_text = (",").join((data.get("url", ""), title, "".join(result)))
   yield("%s\n" % csv_format_text.encode("utf-8", "ignore"))
 
 class ExportCloudStoragePipeline(base_handler.PipelineBase):
@@ -141,10 +153,12 @@ def _to_datastore_map(kv_content):
   k, v = kv_content 
   parsed_csv = v.split(",")
   url = ""
+  title = ""
   content = ""
   try:
     url = parsed_csv[0]
-    content = parsed_csv[1]
+    title = parsed_csv[1]
+    content = parsed_csv[2]
   except Exception as e:
     logging.warning("Can't parse csv:" + v + ":" + e.message)
 
@@ -152,6 +166,7 @@ def _to_datastore_map(kv_content):
       url,
       parent=ndb.Key(ContentsDatum, url),
       url=url,
+      title=title,
       content=content,
       description=None)
   yield url

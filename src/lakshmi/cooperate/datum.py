@@ -21,12 +21,14 @@ class ContentsDatum(ndb.Model):
 
   Properties:
     url: the url of content
+    title: the title of content
     content: the body of content
     description: the description of content,
       that it like so score of contents or 
       json value of description etc.
   """
   url = ndb.StringProperty()
+  title = ndb.StringProperty()
   content = ndb.TextProperty(indexed=False)
   description = ndb.TextProperty(indexed=False) 
   

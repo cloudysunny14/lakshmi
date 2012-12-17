@@ -82,8 +82,8 @@ class ImportPipelineTest(testutil.HandlerTestBase):
     testutil.HandlerTestBase.setUp(self)
     pipeline.Pipeline._send_mail = self._send_mail
     self.emails = []
-    file_name_list = createCloudStorageFiles(3, ["URL1,Content1\nURL2,Content2",
-        "URL3,Content3\nURL4,Content4", "URL5,Content5\nURL6,Content6"])
+    file_name_list = createCloudStorageFiles(3, ["URL1,Title1,Content1\nURL2,Title2,Content2",
+        "URL3,Title3,Content3\nURL4,Title4,Content4", "URL5,Title5,Content5\nURL6,Title6,Content6"])
     file_name_lines = "\n".join(file_name_list)
     target_file =  files.gs.create("/gs/"+TEST_BUCKET_NAME+"/targets")
     with files.open(target_file, 'a') as fp:
