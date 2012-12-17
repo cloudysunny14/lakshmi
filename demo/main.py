@@ -109,7 +109,7 @@ class ScorePipeline(base_handler.PipelineBase):
 class RemoveIndex(base_handler.PipelineBase):
   def run(self, output):
     #Remove search index
-    for index in search.list_indexes(fetch_schema=True):
+    for index in search.get_indexes(fetch_schema=True):
       doc_index = search.Index(name=index.name)
 
       while True:
