@@ -267,7 +267,6 @@ def _makeFetchSetBufferMap(binary_record):
   except Exception as e:
     logging.warning("Fetch error occurs from CrawlDbDatum" + e.message)
 
-  filtered_domain_list = url_filter_yaml.domain_urlfilter
   can_fetch = False
   #Get the fetcher policy from resource.
   user_agent = fetcher_policy_yaml.fetcher_policy.agent_name
@@ -284,10 +283,6 @@ def _makeFetchSetBufferMap(binary_record):
     except Exception as e:
       logging.warning("RobotFileParser raises exception:" + e.message)
       url = ""
-    # If extract_domain_url was contains filtered_domain_urls,
-    # all url don't fetch, which belong to filtered domain. 
-    if filtered_domain_list and extract_domain_url in filtered_domain_list:
-      can_fetch = False
     
     yield (url, can_fetch)
 
@@ -466,6 +461,7 @@ def _extract_outlinks_map(data):
   content = None
   exempt_links = url_filter_yaml.urlfilter
   regex_filter_links = url_filter_yaml.regex_urlfilter
+  domain_urlfilter = url_filter_yaml.domain_urlfilter
   if fetched_datum is not None:
     entity_future = query.fetch_async(limit=1)
     content = fetched_datum.content_text
@@ -487,7 +483,8 @@ def _extract_outlinks_map(data):
       crawl_depth += 1
       memcache.set(key=url, value=0)
       try:
-        for extract_url in parsed_obj: 
+        for extract_url in parsed_obj:
+          parsed_uri = urlparse(extract_url)
           if len(extract_url) > 500:
             # To use url as a key, requires to string size is lower to 500 characters.
             logging.warning("Can not use as a key:"+extract_url)
@@ -499,10 +496,14 @@ def _extract_outlinks_map(data):
           elif regex_filter_links is not None and True in map(lambda l:
             bool(re.search(l, extract_url)), regex_filter_links):
             # Regex Filtered url.
-            logging.warning("Regex Filtered url:"+extract_url)
+            logging.warning("Regex filtered url:"+extract_url)
             continue
-
-          parsed_uri = urlparse(extract_url)
+          elif domain_urlfilter is not None and\
+              "%s://%s" % (parsed_uri.scheme, parsed_uri.netloc) in domain_urlfilter:
+            # To use url as a key, requires to string size is lower to 500 characters.
+            logging.warning("Domain filtered url:"+extract_url)
+            continue
+            
           if parsed_uri.scheme == "http" or parsed_uri.scheme == "https":
             #If parsed outlink url has existing in datum, not put.
             crawl_db_datum = CrawlDbDatum.insert_or_fail(extract_url, parent=ndb.Key(CrawlDbDatum, url),

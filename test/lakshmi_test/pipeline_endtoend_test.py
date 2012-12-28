@@ -219,12 +219,13 @@ class FetchPipelineFilteredDomainTest(testutil.HandlerTestBase):
     entities = CrawlDbDatum.query(CrawlDbDatum.url=="http://appengine.google.com/bar.txt").fetch()
     entity = entities[0]
     fetched_datum = FetchedDatum.get_by_id(entity.url)
-    self.assertTrue(fetched_datum is None)    
+    #Domain filter is replace to extract outlinks job for issue #20
+    self.assertTrue(fetched_datum is not None)    
 
 def _htmlFixOutlinkParser(content):
   "htmlOutlinkParser for testing"
   return ["http://appengine.google.com/cloudysunny14/", "http://appengine.google.com/cloudysunny14/tag/content",
-      "http://appengine.google.com/cloudysunny14/dummy_content"] 
+      "http://appengine.google.com/cloudysunny14/dummy_content", "http://anothercontent.com/cloudysunny14"] 
 
 class FetchPipelineFilteredURLTest(testutil.HandlerTestBase):
   """Test for FetchPipeline"""

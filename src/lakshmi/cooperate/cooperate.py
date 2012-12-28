@@ -75,13 +75,16 @@ def _to_csv_map(entity_type):
   data = ndb.Model.to_dict(entity_type)
   content = data.get("content_text", None)
   result = []
-  title = ""
+  result_title = []
   if content is not None:
-    title = _extract_title(content)
-    cleaned_content = clean_html(content.replace(",", ""))
+    remove_commas_content = content.replace(",", "")
+    title = _extract_title(remove_commas_content)
+    cleaned_content = clean_html(remove_commas_content)
+    result_title = filter(lambda l: " ".join(l.split()), title.splitlines())
     result = filter(lambda l: " ".join(l.split()), cleaned_content.splitlines())
 
-  csv_format_text = (",").join((data.get("url", ""), title, "".join(result)))
+  csv_format_text = (",").join((data.get("url", ""),
+      "".join(result_title), "".join(result)))
   yield("%s\n" % csv_format_text.encode("utf-8", "ignore"))
 
 class ExportCloudStoragePipeline(base_handler.PipelineBase):
