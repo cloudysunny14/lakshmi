@@ -20,67 +20,106 @@
 __author__ = """cloudysunny14@gmail.com (Kiyonari Harigae)"""
 
 import re
+import os
+
 from google.appengine.ext.webapp.util import run_wsgi_app
 from google.appengine.ext import ndb
 from google.appengine.ext import webapp
-from google.appengine.api import search
+from google.appengine.api import mail
+from google.appengine.api import memcache
 
 from mapreduce import base_handler
 
 from lakshmi import pipelines
-from lakshmi import configuration
 from lakshmi.datum import CrawlDbDatum
+from lakshmi.datum import LinkDbDatum
+from lakshmi.datum import ContentDbDatum
+from lakshmi.datum import FetchedDbDatum
 from lakshmi.cooperate import cooperate
+from jinja2 import Environment, FileSystemLoader
 
 ENTITY_KIND = "lakshmi.datum.CrawlDbDatum"
 #specified some urls
-ROOT_URLS = ["http://www.python.org/"]
+def htmlParser(key, content):
+  outlinks = re.findall(r'href=[\'"]?([^\'" >]+)', content)
+  CrawlDbDatum
+  link_datums = []
+  for link in outlinks:
+    link_datum = LinkDbDatum(parent=key, link_url=link)
+    link_datums.append(link_datum)
+  ndb.put_multi(link_datums) 
+  content_links = re.findall(r'src=[\'"]?([^\'" >]+)', content)
+  return content_links
 
-#Create Datum Handlers
-class AddRootUrlsHandler(webapp.RequestHandler):
-  def get(self):
-    self.response.headers['Content-Type'] = 'text/plain'
-    insert_num = 0
-    for url in ROOT_URLS:
-      data = CrawlDbDatum(
-          parent =ndb.Key(CrawlDbDatum, url),
-          url=url,
-          last_status=pipelines.UNFETCHED,
-          crawl_depth=0)
-      data.put()
-      insert_num += 1
-
-    self.response.out.write("SETTING %d ROOT URL IS SUCCESS"%insert_num)
-
-#lakshmi pipeline Handlers
-import random
-
-def _htmlOutlinkParser(content):
-  "htmlOutlinkParser for ramdam extracting"
-  link_list = re.findall(r'href=[\'"]?([^\'" >]+)', content)
-  while link_list:
-    if link_list != []:
-      index = random.randint(0, len(link_list) - 1)
-      elem = link_list[index]
-      link_list[index] = link_list[-1]
-      del link_list[-1]
-      yield elem
-    else:
-      yield link_list
-
-class FetchStart(webapp.RequestHandler):
-  def get(self):
-    pipeline = pipelines.FetcherPipeline("FetcherPipeline",
+class FecherJobPipeline(base_handler.PipelineBase):
+  def run(self, email):
+    memcache.set(key="email", value=email)
+    yield pipelines.FetcherPipeline("FetcherPipeline",
         params={
           "entity_kind": ENTITY_KIND
         },
         parser_params={
-          "text/html": "main._htmlOutlinkParser",
-          "application/rss+xml": "main._htmlOutlinkParser",
-          "application/atom+xml": "main._htmlOutlinkParser",
-          "text/xml": "main._htmlOutlinkParser"
+          "text/html": "main.htmlParser",
+          "application/rss+xml": "main.htmlParser",
+          "application/atom+xml": "main.htmlParser",
+          "text/xml": "main.htmlParser"
         },
-        shards=16)
+        shards=4)
+
+  def finalized(self):
+    """Sends an email to admins indicating this Pipeline has completed.
+
+    For developer convenience. Automatically called from finalized for root
+    Pipelines that do not override the default action.
+    """
+    status = 'successful'
+    if self.was_aborted:
+      status = 'aborted'
+    url = memcache.get("url")
+    email = memcache.get("email")
+    base_dir = os.path.realpath(os.path.dirname(__file__))
+    # Configure jinja for internal templates
+    env = Environment(
+        autoescape=True,
+        extensions=['jinja2.ext.i18n'],
+        loader=FileSystemLoader(
+            os.path.join(base_dir, 'templates')
+          )
+        )
+    subject = "Your Fetcher Job is "+status
+    crawl_db_datum = crawl_db_datums = CrawlDbDatum.query(CrawlDbDatum.url==url).fetch()
+    crawl_db_datum = crawl_db_datums[0]
+    content_db_datums = ContentDbDatum.query(ancestor=crawl_db_datum.key).fetch_async()
+    fetched_db_datums = FetchedDbDatum.query(ancestor=crawl_db_datum.key).fetch()
+    attachments = []
+    if len(fetched_db_datums)>0:
+      fetched_db_datum = fetched_db_datums[0]
+      attachments.append(("fetched_content.html", fetched_db_datum.fetched_content))
+    link_db_datums = LinkDbDatum.query(ancestor=crawl_db_datum.key).fetch_async()
+    html = env.get_template("mail_template.html").render(url=url,
+        contents=content_db_datums, links=link_db_datums)
+    attachments.append(("sendmail.html", html))
+    sender = "cloudysunny14@gmail.com"
+    mail.send_mail(sender=sender, to=email, subject=subject,
+        body="FetchResults", html=html, attachments=attachments)
+
+class FetchStart(webapp.RequestHandler):
+  def get(self):
+    url = self.request.get("target", default_value=None)
+    email = self.request.get("email", default_value=None)
+    if url is None:
+      url = memcache.get("url")
+    else:
+      memcache.set(key="url", value=url)
+    if email is None:
+      return
+
+    data = CrawlDbDatum(
+          parent =ndb.Key(CrawlDbDatum, url),
+          url=url,
+          last_status=pipelines.UNFETCHED)
+    data.put()
+    pipeline = FecherJobPipeline(email) 
     pipeline.start()
     path = pipeline.base_path + "/status?root=" + pipeline.pipeline_id
     self.redirect(path)
@@ -97,72 +136,9 @@ class DeleteDatumHandler(webapp.RequestHandler):
     path = pipeline.base_path + "/status?root=" + pipeline.pipeline_id
     self.redirect(path) 
 
-class ScorePipeline(base_handler.PipelineBase):
-  def run(self, entity_type):
-    output = yield pipelines.PageScorePipeline("PageScorePipeline",
-        params={
-          "entity_kind": entity_type
-        },
-        shards=16)
-    yield RemoveIndex(output)
-    
-class RemoveIndex(base_handler.PipelineBase):
-  def run(self, output):
-    #Remove search index
-    for index in search.get_indexes(fetch_schema=True):
-      doc_index = search.Index(name=index.name)
-
-      while True:
-        # Get a list of documents populating only the doc_id field and extract the ids.
-        document_ids = [document.doc_id for document in doc_index.get_range(ids_only=True)]
-        if not document_ids:
-          break
-        # Remove the documents for the given ids from the Index.
-        doc_index.remove(document_ids)
-
-class RemoveDoc(webapp.RequestHandler):
-  def get(self):
-    pipeline = RemoveIndex(None)
-    pipeline.start()
-    path = pipeline.base_path + "/status?root=" + pipeline.pipeline_id
-    self.redirect(path)
-
-class ScoreHandler(webapp.RequestHandler):
-  def get(self):
-    pipeline = ScorePipeline(ENTITY_KIND)
-    pipeline.start()
-    path = pipeline.base_path + "/status?root=" + pipeline.pipeline_id
-    self.redirect(path)
-
-class ReFetch(webapp.RequestHandler):
-  def get(self):
-    pipeline = pipelines.FetcherPipeline("FetcherPipeline",
-        params={
-          "entity_kind": ENTITY_KIND
-        },
-        parser_params=None,
-        need_extract=False,
-        shards=16)
-    pipeline.start()
-    path = pipeline.base_path + "/status?root=" + pipeline.pipeline_id
-    self.redirect(path)
-
-score_config_yaml = configuration.ScoreConfigYaml.create_default_config()
-
-class CleanHandler(webapp.RequestHandler):
-  def get(self):
-    pipeline = pipelines.CleanDatumPipeline("CleanDatumPipeline",
-        params={
-          "entity_kind": ENTITY_KIND
-        },
-        shards=8)
-    pipeline.start()
-    path = pipeline.base_path + "/status?root=" + pipeline.pipeline_id
-    self.redirect(path)
-
 #Cooperate Handlers
 FETCHED_DATUM_ENTITY_KIND = "lakshmi.datum.FetchedDatum"
-GS_BUCKET = "your_bucket_name"
+GS_BUCKET = "your_backet_name"
 
 class ExportHandler(webapp.RequestHandler):
   def get(self):
@@ -176,12 +152,7 @@ class ExportHandler(webapp.RequestHandler):
 
 application = webapp.WSGIApplication(
                                      [("/start", FetchStart),
-                                     ("/add_data", AddRootUrlsHandler),
                                      ("/clean_all", DeleteDatumHandler),
-                                     ("/score", ScoreHandler),
-                                     ("/refetch", ReFetch),
-                                     ("/clean", CleanHandler),
-                                     ("/remove_doc", RemoveDoc),
                                      ("/export", ExportHandler)],
                                      debug=True)
                                      

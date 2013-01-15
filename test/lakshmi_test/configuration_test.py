@@ -95,8 +95,7 @@ class FetcherPolicyYamlTest(unittest.TestCase):
         "  accept_language: en-us,en-gb,en;q=0.7,*;q=0.3\n"
         "  valid_mime_types: text/html\n"
         "  redirect_mode: follow_all\n"
-        "  request_timeout: 20000\n"
-        "  max_links_per_page: 10")
+        "  request_timeout: 20000\n")
 
     self.assertTrue(fetcher_policy_yaml)
     self.assertTrue("test", fetcher_policy_yaml.fetcher_policy.agent_name)
@@ -117,7 +116,6 @@ class FetcherPolicyYamlTest(unittest.TestCase):
     self.assertEquals("text/html", fetcher_policy_yaml.fetcher_policy.valid_mime_types)
     self.assertEquals("follow_all", fetcher_policy_yaml.fetcher_policy.redirect_mode)
     self.assertEquals("20000", fetcher_policy_yaml.fetcher_policy.request_timeout)
-    self.assertEquals("10", fetcher_policy_yaml.fetcher_policy.max_links_per_page)
 
   def testParseMissingRequiredAttrs(self):
     """Test parsing with missing required attributes."""
@@ -167,8 +165,7 @@ class FetcherPolicyYamlTest(unittest.TestCase):
         "  accept_language: en-us,en-gb,en;q=0.7,*;q=0.3\n"
         "  valid_mime_types: text/html\n"
         "  redirect_mode: follow_all\n"
-        "  request_timeout: 20\n"
-        "  max_links_per_page: 10\n")
+        "  request_timeout: 20\n")
     all_configs = configuration.FetcherPolicyYaml.to_dict(fp_yaml)
     self.assertEquals(
       {
@@ -186,192 +183,7 @@ class FetcherPolicyYamlTest(unittest.TestCase):
             'accept_language': "en-us,en-gb,en;q=0.7,*;q=0.3",
             'valid_mime_types': "text/html",
             'redirect_mode': "follow_all",
-            'request_timeout': "20",
-            'max_links_per_page': "10"
-      }, all_configs)
-
-class ScoreConfigYamlTest(unittest.TestCase):
-  """Testing fetcher_policy.yaml-related functionality."""
-  
-  def set_up_directory_tree(self, dir_tree_contents):
-    """Create directory tree from dict of path:contents entries."""
-    for full_path, contents in dir_tree_contents.iteritems():
-      dir_name = os.path.dirname(full_path)
-      if not os.path.isdir(dir_name):
-        os.makedirs(dir_name)
-      f = open(full_path, 'w')
-      f.write(contents)
-      f.close()
-
-  def setUp(self):
-    """Initialize temporary application variable."""
-    self.tempdir = tempfile.mkdtemp()
-
-  def tearDown(self):
-    """Remove temporary application directory."""
-    if self.tempdir:
-      shutil.rmtree(self.tempdir)
-
-  def testFindYamlFile(self):
-    """Test if mapreduce.yaml can be found with different app/library trees."""
-    test_conf = os.path.join(self.tempdir, "library_root", "lakshmi", "configuration.py")
-    test_score_config_yaml = os.path.join(self.tempdir, "application_root",
-                                       "score_config.yaml")
-    test_dict = {
-        test_conf: "test",
-        test_score_config_yaml: "test",
-    }
-    self.set_up_directory_tree(test_dict)
-    os.chdir(os.path.dirname(test_score_config_yaml))
-    yaml_loc = configuration.find_score_config_yaml(conf_file=test_conf)
-    self.assertEqual(("/private%s" % test_score_config_yaml), yaml_loc)
-
-  def testFindYamlFileSameTree(self):
-    """Test if fetcher_policy.yaml can be found with the same app/library tree."""
-    test_conf = os.path.join(self.tempdir, "library_root", "lakshmi", "configuration.py")
-    test_score_config_yaml = os.path.join(self.tempdir, "application_root",
-                                       "score_config.yaml")
-    test_dict = {
-        test_conf: "test",
-        test_score_config_yaml: "test",
-    }
-    self.set_up_directory_tree(test_dict)
-    os.chdir(os.path.dirname(test_score_config_yaml))
-    yaml_loc = configuration.find_score_config_yaml(conf_file=test_conf)
-    self.assertEqual(("/private%s" % test_score_config_yaml), yaml_loc)
-
-  def testParseEmptyFile(self):
-    """Parsing empty mapreduce.yaml file."""
-    self.assertRaises(errors.BadYamlError,
-                      configuration.parse_score_config_yaml,
-                      "")
-
-  def testParse(self):
-    """Parsing a single document in score_config.yaml."""
-    score_config_yaml = configuration.parse_score_config_yaml(
-        "score_config:\n"
-        "  score_query: Python,Google App Engine\n"
-        "  adopt_score: 0.5\n")
-
-    self.assertTrue(score_config_yaml)
-    self.assertTrue("Python,Google App Engine", score_config_yaml.score_config.score_query)
-    self.assertTrue("test@domain.com", score_config_yaml.score_config.adopt_score)
-
-  def testParseMissingRequiredAttrs(self):
-    """Test parsing with missing required attributes."""
-    self.assertRaises(errors.BadYamlError,
-                      configuration.parse_score_config_yaml,
-                      "score_config:\n"
-                      "  score_query: 0\n")
-
-  def testBadValues(self):
-    """Tests when some yaml values are of the wrong type."""
-    self.assertRaises(errors.BadYamlError,
-                      configuration.parse_fetcher_policy_yaml,
-                      "score_config:\n"
-                      "  score_query: 0\n"
-                      "  adopt_score: $$Invalid$$\n")
-
-  def testToDict(self):
-    """Tests encoding the SC document as JSON."""
-    sc_yaml = configuration.parse_score_config_yaml(
-        "score_config:\n"
-        "  score_query: Python,Google App Engine\n"
-        "  adopt_score: 0.5\n")
-    all_configs = configuration.ScoreConfigYaml.to_dict(sc_yaml)
-    self.assertEquals(
-      {
-            'score_query': "Python,Google App Engine",
-            'adopt_score': "0.5"
-      }, all_configs)
-
-class UrlFilterYamlTest(unittest.TestCase):
-  """Testing url_filter.yaml-related functionality."""
-  
-  def set_up_directory_tree(self, dir_tree_contents):
-    """Create directory tree from dict of path:contents entries."""
-    for full_path, contents in dir_tree_contents.iteritems():
-      dir_name = os.path.dirname(full_path)
-      if not os.path.isdir(dir_name):
-        os.makedirs(dir_name)
-      f = open(full_path, 'w')
-      f.write(contents)
-      f.close()
-
-  def setUp(self):
-    """Initialize temporary application variable."""
-    self.tempdir = tempfile.mkdtemp()
-
-  def tearDown(self):
-    """Remove temporary application directory."""
-    if self.tempdir:
-      shutil.rmtree(self.tempdir)
-
-  def testFindYamlFile(self):
-    """Test if url_filter.yaml can be found with different app/library trees."""
-    test_conf = os.path.join(self.tempdir, "library_root", "lakshmi", "configuration.py")
-    test_url_filter = os.path.join(self.tempdir, "application_root",
-                                       "url_filter.yaml")
-    test_dict = {
-        test_conf: "test",
-        test_url_filter: "test",
-    }
-    self.set_up_directory_tree(test_dict)
-    os.chdir(os.path.dirname(test_url_filter))
-    yaml_loc = configuration.find_url_filter_yaml(conf_file=test_conf)
-    self.assertEqual(("/private%s" % test_url_filter), yaml_loc)
-
-  def testFindYamlFileSameTree(self):
-    """Test if url_filter.yaml can be found with the same app/library tree."""
-    test_conf = os.path.join(self.tempdir, "library_root", "lakshmi", "configuration.py")
-    test_url_filter_yaml = os.path.join(self.tempdir, "application_root",
-                                       "url_filter.yaml")
-    test_dict = {
-        test_conf: "test",
-        test_url_filter_yaml: "test",
-    }
-    self.set_up_directory_tree(test_dict)
-    os.chdir(os.path.dirname(test_url_filter_yaml))
-    yaml_loc = configuration.find_url_filter_yaml(conf_file=test_conf)
-    self.assertEqual(("/private%s" % test_url_filter_yaml), yaml_loc)
-
-  def testParseEmptyFile(self):
-    """Parsing empty url_filter.yaml file."""
-    self.assertRaises(errors.BadYamlError,
-                      configuration.parse_url_filter_yaml,
-                      "")
-
-  def testParse(self):
-    """Parsing a single document in url_filter.yaml."""
-    url_filter_yaml = configuration.parse_url_filter_yaml(
-        "domain_urlfilter:\n"
-        "  - http://foo.com\n"
-        "  - http://bar.com\n"
-        "urlfilter:\n"
-        "  - http://foo.com/bar/\n"
-        "regex_urlfilter:\n"
-        "  - (http://foo.com/tag/.+)\n"
-        "  - (http://bar.com/category.+)\n")
-
-    self.assertTrue(url_filter_yaml)
-    self.assertTrue(str(["http://foo.com", "http://bar.com"]), str(url_filter_yaml.domain_urlfilter))
-    self.assertTrue(str(["http://foo.com/bar/"]), str(url_filter_yaml.urlfilter))
-    self.assertTrue(str(["(http://foo.com/tag/.+)", "(http://bar.com/category.+)"]), str(url_filter_yaml.regex_urlfilter))
-
-  def testToDict(self):
-    """Tests encoding the UF document as JSON."""
-    uf_yaml = configuration.parse_url_filter_yaml(
-        "domain_urlfilter:\n"
-        "  - http://foo.com\n"
-        "  - http://bar.com\n"
-        "urlfilter:\n"
-        "  - http://foo.com/bar/\n")
-    all_configs = configuration.UrlFilterYaml.to_dict(uf_yaml)
-    self.assertEquals(
-      {
-            "domain_urlfilter": ["http://foo.com", "http://bar.com"],
-            "urlfilter": ["http://foo.com/bar/"],
-            "regex_urlfilter": None
+            'request_timeout': "20"
       }, all_configs)
 
 if __name__ == "__main__":

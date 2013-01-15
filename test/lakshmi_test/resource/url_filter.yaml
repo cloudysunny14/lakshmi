@@ -1,4 +1,0 @@
-domain-urlfilter:
-  - http://appengine.google.com #ignore links domain.
-urlfilter:
-  - http://appengine.google.com/cloudysunny14/

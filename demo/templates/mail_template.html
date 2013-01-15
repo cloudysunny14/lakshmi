@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en" class="no-js">
+<head>
+	<head>
+    <title>Success FetchPage Pipeline!!</title>
+	</head>
+  <meta charset="utf-8">
+</head>
+<body style="background: #000;font-family: Georgia, Palatino, serif;color: #EEE;line-height: 1;padding: 30px; margin:auto;max-width:42em;">
+<div>
+  <h1 style="font-size: 48px;font-weight: 400;margin-bottom: 24px;padding: 0;">You have Fetched Page From 
+    <a style="color: #61BFC1;margin: 0;padding: 0;text-decoration: none;vertical-align: baseline;"href={{url}} target="_blank">This Page</a></h1>
+  <h1 style="font-size: 48px;font-weight: 400;margin-bottom: 24px;padding: 0;">Links</h1>
+  <ul class=link_list style="font-size: 12px; margin-left: 10px;">
+  {% for link in links.get_result() %}
+  <li>
+    <a href={{ link.link_url }} target="_blank">{{ link.link_url|truncate(length=200, killwords=True, end='...')|e}}</a>
+  {% endfor %}
+  </ul>
+  <h1 >Contents</h1>
+  <div>
+  <ul style="margin: 5px; padding: 0; list-style: none;">
+  {% for content in contents.get_result() %}
+  <li style="margin: 5px; padding: 0; list-style: none;"><img src="{{ content.stored_url }}">
+  {% endfor %}
+</ul>
+You received this message because you are tried lakshmi crawler.
+&copy; Copyright 2012 by <a href=https://plus.google.com/u/0/111497184393796484290/posts target="_blank">cloudysunny14(Kiyonari Harigae)</a><br>
+Give feedback to <a href=http://code.google.com/p/lakshmi/ target="_blank">lakshmi project</a>
+</div>
+</body>
+</html>

@@ -20,17 +20,20 @@ import time
 import re
 
 from google.appengine.api import apiproxy_stub
+from google.appengine.ext import ndb
 from mapreduce.lib import pipeline
 from mapreduce import test_support
 from testlib import testutil
 from lakshmi import pipelines
 from lakshmi.datum import CrawlDbDatum
-from lakshmi.datum import FetchedDatum
+from lakshmi.datum import FetchedDbDatum
+from lakshmi.datum import LinkDbDatum
+from lakshmi.datum import ContentDbDatum
 
 def createMockCrawlDbDatum(url):
     """Create CrawlDbDatum mock data."""
     CrawlDbDatum.get_or_insert(url,
-        url=url, last_status=pipelines.UNFETCHED, crawl_depth=0)
+        url=url, last_status=pipelines.UNFETCHED)
     
 class URLFetchServiceMockForUrl(apiproxy_stub.APIProxyStub):
   """Mock for google.appengine.api.urlfetch."""
@@ -74,9 +77,15 @@ class URLFetchServiceMockForUrl(apiproxy_stub.APIProxyStub):
     self.request = request
     self.response = response
 
-def _htmlOutlinkParser(content):
-  "htmlOutlinkParser for testing"
-  return re.findall(r'href=[\'"]?([^\'" >]+)', content)
+def htmlParser(key, content):
+  outlinks = re.findall(r'href=[\'"]?([^\'" >]+)', content)
+  link_datums = []
+  for link in outlinks:
+    link_datum = LinkDbDatum(parent=key, link_url=link)
+    link_datums.append(link_datum)
+  ndb.put_multi_async(link_datums) 
+  content_links = re.findall(r'src=[\'"]?([^\'" >]+)', content) 
+  return content_links
 
 class FetchPipelineEndtoEndTest(testutil.HandlerTestBase):
   """Test for FetchPipeline"""
@@ -103,35 +112,44 @@ class FetchPipelineEndtoEndTest(testutil.HandlerTestBase):
         content=static_robots,
         headers={"Content-Length": len(static_robots)})
     #static resource is read from resource
-    resource = self.getResource("cloudysunny14.html")
+    resource = self.getResource("sample_content.html")
     static_content = resource.read()
     static_content_length = len(static_content)
     self.setReturnValue(url="http://foo.com/bar.html",
         content=static_content,
         headers={"Content-Length": static_content_length,
             "Content-Type": "text/html"})
+    resource_image = self.getResource("slide1.png")
+    static_content_image = resource_image.read()
+    static_content_length = len(static_content_image)
+    self.setReturnValue(url="http://foo.com/images/slide1.png",
+        content=static_content_image,
+        headers={"Content-Length": static_content_length,
+            "Content-Type": "image/png"})
     p = pipelines.FetcherPipeline("FetcherPipeline",
         params={
           "entity_kind": "lakshmi.datum.CrawlDbDatum"
         },
         parser_params={
-          "text/html": __name__ + "._htmlOutlinkParser"
+          "text/html": __name__ + ".htmlParser"
         },
         shards=2)
     p.start()
     test_support.execute_until_empty(self.taskqueue)
     
-    entities = CrawlDbDatum.query(CrawlDbDatum.url=="http://foo.com/bar.html").fetch()
-    entity = entities[0]
-    fetched_datum = FetchedDatum.get_by_id(entity.url)
-    self.assertTrue(fetched_datum is not None)
-    qry = CrawlDbDatum.query(CrawlDbDatum.last_status == pipelines.UNFETCHED)
-    crawl_db_datums = qry.fetch()
-    self.assertEquals(10,len(crawl_db_datums))
-    for crawl_db_datum in crawl_db_datums:
-      self.assertEquals(1, crawl_db_datum.crawl_depth)
+    crawl_db_datums = CrawlDbDatum.query(CrawlDbDatum.url=="http://foo.com/bar.html").fetch()
+    crawl_db_datum = crawl_db_datums[0]
+    self.assertTrue(pipelines.FETCHED, crawl_db_datum.last_status)
+    fetched_db_datums = FetchedDbDatum.query(ancestor=crawl_db_datum.key).fetch()
+    fetched_db_datum = fetched_db_datums[0]
+    self.assertTrue(fetched_db_datum is not None)
+    self.assertTrue("http://foo.com/bar.html", fetched_db_datum.fetched_url)
+    link_db_datums = LinkDbDatum.query(ancestor=crawl_db_datum.key).fetch()
+    self.assertTrue(len(link_db_datums)>0)
+    contents_db_datums = ContentDbDatum.query(ancestor=crawl_db_datum.key).fetch()
+    self.assertTrue(len(contents_db_datums)>0)
 
-def _parserNotOutlinks(cotent):
+def _parserNotOutlinks(url, cotent):
   return None
 
 class FetchPipelineWithSpecifiedParserTest(testutil.HandlerTestBase):
@@ -176,101 +194,6 @@ class FetchPipelineWithSpecifiedParserTest(testutil.HandlerTestBase):
     p.start()
     test_support.execute_until_empty(self.taskqueue)
 
-class FetchPipelineFilteredDomainTest(testutil.HandlerTestBase):
-  """Test for FetchPipeline"""
-  def setUp(self):
-    testutil.HandlerTestBase.setUp(self, urlfetch_mock=URLFetchServiceMockForUrl())
-    pipeline.Pipeline._send_mail = self._send_mail
-    self.emails = []
-  
-  def _send_mail(self, sender, subject, body, html=None):
-    """Callback function for sending mail."""
-    self.emails.append((sender, subject, body, html))
-
-  def getResource(self, file_name):
-    """ to get contents from resource"""
-    path = os.path.join(os.path.dirname(__file__), "resource", file_name)
-    return open(path)
-
-  def testFetchEndToEnd(self):
-    """Test for through of fetcher job"""
-    createMockCrawlDbDatum("http://appengine.google.com/bar.txt")
-    static_robots = "User-agent: test\nDisallow: /content_0\nDisallow: /content_1\nDisallow: /content_3"
-    self.setReturnValue(url="http://appengine.google.com/robots.txt",
-        content=static_robots,
-        headers={"Content-Length": len(static_robots)})
-    resource = self.getResource("cloudysunny14.html")
-    static_content = resource.read()
-    static_content_length = len(static_content)
-    self.setReturnValue(url="http://appengine.google.com/bar.txt",
-        content=static_content,
-        headers={"Content-Length": static_content_length,
-            "Content-Type": "text/plain"})
-    p = pipelines.FetcherPipeline("FetcherPipeline",
-        params={
-          "entity_kind": "lakshmi.datum.CrawlDbDatum"
-        },
-        parser_params={
-          "text/html": __name__ + "._htmlOutlinkParser"
-        },
-        shards=2)
-    p.start()
-    test_support.execute_until_empty(self.taskqueue)
-    entities = CrawlDbDatum.query(CrawlDbDatum.url=="http://appengine.google.com/bar.txt").fetch()
-    entity = entities[0]
-    fetched_datum = FetchedDatum.get_by_id(entity.url)
-    #Domain filter is replace to extract outlinks job for issue #20
-    self.assertTrue(fetched_datum is not None)    
-
-def _htmlFixOutlinkParser(content):
-  "htmlOutlinkParser for testing"
-  return ["http://appengine.google.com/cloudysunny14/", "http://appengine.google.com/cloudysunny14/tag/content",
-      "http://appengine.google.com/cloudysunny14/dummy_content", "http://anothercontent.com/cloudysunny14"] 
-
-class FetchPipelineFilteredURLTest(testutil.HandlerTestBase):
-  """Test for FetchPipeline"""
-  def setUp(self):
-    testutil.HandlerTestBase.setUp(self, urlfetch_mock=URLFetchServiceMockForUrl())
-    pipeline.Pipeline._send_mail = self._send_mail
-    self.emails = []
-  
-  def _send_mail(self, sender, subject, body, html=None):
-    """Callback function for sending mail."""
-    self.emails.append((sender, subject, body, html))
-
-  def getResource(self, file_name):
-    """ to get contents from resource"""
-    path = os.path.join(os.path.dirname(__file__), "resource", file_name)
-    return open(path)
-
-  def testFetchEndToEnd(self):
-    """Test for through of fetcher job"""
-    createMockCrawlDbDatum("http://content/cloudysunny14/")
-    static_robots = "User-agent: test\nDisallow: /content_0\nDisallow: /content_1\nDisallow: /content_3"
-    self.setReturnValue(url="http://content/robots.txt",
-        content=static_robots,
-        headers={"Content-Length": len(static_robots)})
-    resource = self.getResource("cloudysunny14.html")
-    static_content = resource.read()
-    static_content_length = len(static_content)
-    self.setReturnValue(url="http://content/cloudysunny14/",
-        content=static_content,
-        headers={"Content-Length": static_content_length,
-            "Content-Type": "text/html"})
-    p = pipelines.FetcherPipeline("FetcherPipeline",
-        params={
-          "entity_kind": "lakshmi.datum.CrawlDbDatum"
-        },
-        parser_params={
-          "text/html": __name__ + "._htmlFixOutlinkParser"
-        },
-        shards=2)
-    p.start()
-    test_support.execute_until_empty(self.taskqueue)
-    
-    qry = CrawlDbDatum.query(CrawlDbDatum.last_status == pipelines.UNFETCHED)
-    crawl_db_datums = qry.fetch()
-    self.assertEquals(1,len(crawl_db_datums))
 
 if __name__ == "__main__":
   unittest.main()

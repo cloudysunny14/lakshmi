@@ -28,7 +28,8 @@ from testlib import testutil
 from mapreduce import test_support
 from lakshmi import pipelines
 from lakshmi.datum import CrawlDbDatum
-from lakshmi.datum import FetchedDatum
+from lakshmi.datum import FetchedDbDatum
+from lakshmi.datum import ContentDbDatum
 from mapreduce.lib.files import records
 
 def createMockCrawlDbDatum(domain_count, url_count, isExtracted):
@@ -43,25 +44,25 @@ def createMockCrawlDbDatum(domain_count, url_count, isExtracted):
             parent =ndb.Key(CrawlDbDatum, url),
             url=url,
             extract_domain_url=extracted_url,
-            last_status=pipelines.UNFETCHED,
-            crawl_depth=0)
+            last_status=pipelines.UNFETCHED)
         datum.put()
 
-def createMockFetchedDatum(url, html_text, status, score=0.0):
+def createMockFetchedDatum(url, html_text, status):
   """Create FetchedDatum mock data."""
   key = ndb.Key(CrawlDbDatum, url)
-  CrawlDbDatum.get_or_insert(url, parent=key,
-      url=url, last_status=status, crawl_depth=0, page_score=score)
+  crawl = CrawlDbDatum.get_or_insert(url, parent=key,
+      url=url, last_status=status)
   if status != pipelines.UNFETCHED:
-    FetchedDatum.get_or_insert(url,
+    fetched_datum = FetchedDbDatum(parent=crawl.key,
         url=url, fetched_url = url,
-        content_text = html_text, content_type="text/html")
+        fetched_content = html_text, content_type="text/html")
+    fetched_datum.put()
 
 def createLinkDatum(parent_url, url):
   """Create Link CrawlDbDatum mock data."""
   key = ndb.Key(CrawlDbDatum, parent_url)
   CrawlDbDatum.get_or_insert(url, parent=key,
-      url=url, last_status=pipelines.UNFETCHED, crawl_depth=0)
+      url=url, last_status=pipelines.UNFETCHED)
         
 class ExactDomainPilelineTest(testutil.HandlerTestBase):
   """Tests for ExactDomainPileline."""
@@ -175,7 +176,6 @@ class RobotFetcherPipelineTest(testutil.HandlerTestBase):
     self.setReturnValue(content=static_content,
                         headers={"Content-Length": len(static_content),
                                  "Content-Type": "text/html"})
-    print("blobKeys" + str(blob_keys))
     p = pipelines._RobotsFetchPipeline("RobotsFetchPipeline", blob_keys, 2)
     p.start()
     
@@ -246,7 +246,7 @@ class FetchSetsBufferPipelineTest(testutil.HandlerTestBase):
       self.assertTrue(key is not None)
       self.assertTrue(value is not None)
 
-class FetchPipelineTest(testutil.HandlerTestBase):
+class FetchPagePipelineTest(testutil.HandlerTestBase):
   """Tests for FetchPipelineTest."""
   def setUp(self):
     testutil.HandlerTestBase.setUp(self)
@@ -283,10 +283,10 @@ class FetchPipelineTest(testutil.HandlerTestBase):
     self.setReturnValue(content=static_content,
                         headers={"Content-Length": len(static_content),
                                  "Content-Type": "text/html"})
-    p = pipelines._FetchPipeline("FetchPipeline", [file_name1, file_name2], 2)
+    p = pipelines._FetchPagePipeline("FetchPipeline", [file_name1, file_name2], 2)
     p.start()
     test_support.execute_until_empty(self.taskqueue)
-    finished_map = pipelines._FetchPipeline.from_id(p.pipeline_id)
+    finished_map = pipelines._FetchPagePipeline.from_id(p.pipeline_id)
     
     # Can open files
     file_paths = finished_map.outputs.default.value
@@ -296,108 +296,10 @@ class FetchPipelineTest(testutil.HandlerTestBase):
     
     entities = CrawlDbDatum.query(CrawlDbDatum.url=="http://hoge_0.com/content_0").fetch()
     entity = entities[0]
-    fetched_datum = FetchedDatum.get_by_id(entity.url)
+    fetched_datum = FetchedDbDatum.query(ancestor=entity.key).fetch()
     self.assertTrue(fetched_datum is not None)
 
-class PageIndexPipelineTest(testutil.HandlerTestBase):
-  """Test for PageIndexPipeline."""
-  def setUp(self):
-    testutil.HandlerTestBase.setUp(self)
-    pipeline.Pipeline._send_mail = self._send_mail
-    self.emails = []
-
-  def getResource(self, file_name):
-    """ to get contents from resource"""
-    path = os.path.join(os.path.dirname(__file__), "resource", file_name)
-    return open(path)
-
-  def _send_mail(self, sender, subject, body, html=None):
-    """Callback function for sending mail."""
-    self.emails.append((sender, subject, body, html))
-
-  def testSuccessfulRun(self):
-    """Test scored page by Search API"""
-    resource_neg = self.getResource("cloudysunny14.html")
-    static_content_neg = resource_neg.read()
-    createMockFetchedDatum("http://cloudysunny14.html", static_content_neg, pipelines.FETCHED)
-    resource_pos = self.getResource("python_positive.html")
-    static_content_pos = resource_pos.read()
-    createMockFetchedDatum("http://python_positive.html", static_content_pos, pipelines.FETCHED)
-    p = pipelines._PageIndexPipeline("PageIndexPipeline", 
-        params={
-          "entity_kind": "lakshmi.datum.CrawlDbDatum"
-        },
-        shards=2) 
-    p.start()
-    test_support.execute_until_empty(self.taskqueue)
-    finished_map = pipelines._PageIndexPipeline.from_id(p.pipeline_id)
-    
-    # Can open files
-    file_paths = finished_map.outputs.default.value
-    self.assertTrue(len(file_paths) > 0)
-    self.assertTrue(file_paths[0].startswith("/blobstore/"))
-
-    reader = input_readers.RecordsReader(file_paths, 0)
-    for binary_record in reader:
-      proto = file_service_pb.KeyValue()
-      proto.ParseFromString(binary_record)
-      key = proto.key()
-      value = proto.value()
-      if key == "http://cloudysunny14.html":
-        self.assertEquals(pipelines.INDEX_NAME, value[:len(pipelines.INDEX_NAME)])
-      elif key == "http://python_positive.html" :
-        self.assertEquals(pipelines.INDEX_NAME, value[:len(pipelines.INDEX_NAME)])
-      else:
-        self.assertTrue(False)
-
-class PageScorePipelineTest(testutil.HandlerTestBase):
-  """Test for PageRankPipeline. """
-  def setUp(self):
-    testutil.HandlerTestBase.setUp(self)
-    pipeline.Pipeline._send_mail = self._send_mail
-    self.emails = []
-
-  def getResource(self, file_name):
-    """ to get contents from resource"""
-    path = os.path.join(os.path.dirname(__file__), "resource", file_name)
-    return open(path)
-
-  def _send_mail(self, sender, subject, body, html=None):
-    """Callback function for sending mail."""
-    self.emails.append((sender, subject, body, html))
-
-  def testSuccessfulRun(self):
-    """Test scored page by Search API"""
-    resource_neg = self.getResource("cloudysunny14.html")
-    static_content_neg = resource_neg.read()
-    createMockFetchedDatum("http://cloudysunny14_neg.html", static_content_neg, pipelines.FETCHED)
-    resource_pos = self.getResource("python_positive.html")
-    static_content_pos = resource_pos.read()
-    createMockFetchedDatum("http://python_positive02.html", static_content_pos, pipelines.FETCHED)
-    createMockFetchedDatum("http://link.html", static_content_pos, pipelines.UNFETCHED)
-    createLinkDatum("http://python_positive02.html", "http://python_positive_link.html")
-    p = pipelines.PageScorePipeline("PageScorePipeline", 
-        params={
-          "entity_kind": "lakshmi.datum.CrawlDbDatum"
-        },
-        shards=2) 
-    p.start()
-    test_support.execute_until_empty(self.taskqueue)
-
-    entities = CrawlDbDatum.query(ancestor=ndb.Key(CrawlDbDatum, "http://cloudysunny14_neg.html")).fetch()
-    for entity in entities:
-      self.assertEquals(pipelines.FETCHED, entity.last_status)
-    
-    entities = CrawlDbDatum.query(ancestor=ndb.Key(CrawlDbDatum, "http://python_positive02.html")).fetch()
-    for entity in entities:
-      if entity.url == "http://python_positive_link.html":
-        self.assertEquals(pipelines.SCORED_PAGE_LINK, entity.last_status)      
-
-    entities = CrawlDbDatum.query(ancestor=ndb.Key(CrawlDbDatum, "http://link.html")).fetch()
-    for entity in entities:
-      self.assertEquals(pipelines.SKIPPED, entity.last_status)
-
-def _htmlOutlinkParser(content):
+def _htmlOutlinkParser(url, content):
   """htmlOutlinkParser for testing"""
   return re.findall(r'href=[\'"]?([^\'" >]+)', "".join(content))
 
@@ -443,13 +345,85 @@ class ExtractOutlinksPipelineTest(testutil.HandlerTestBase):
 
     entities = CrawlDbDatum.query(CrawlDbDatum.url=="http://cloudysunny14.html").fetch()
     entity = entities[0]
-    fetched_datum = FetchedDatum.get_by_id(entity.url)
+    fetched_datum = FetchedDbDatum.query(ancestor=entity.key).fetch()
     self.assertTrue(fetched_datum!=None)
     qry = CrawlDbDatum.query(CrawlDbDatum.last_status == pipelines.UNFETCHED)
     crawl_db_datums = qry.fetch()
-    self.assertEquals(10,len(crawl_db_datums))
-    for crawl_db_datum in crawl_db_datums:
-      self.assertEquals(1, crawl_db_datum.crawl_depth)
+    self.assertTrue(len(crawl_db_datums)==0)
+
+class FetchContentPipelineTest(testutil.HandlerTestBase):
+  """Tests for FetchContentPipeline."""
+  def setUp(self):
+    testutil.HandlerTestBase.setUp(self)
+    pipeline.Pipeline._send_mail = self._send_mail
+    self.emails = []
+
+  def getResource(self, file_name):
+    """ to get contents from resource"""
+    path = os.path.join(os.path.dirname(__file__), "resource", file_name)
+    return open(path)
+  
+  def _send_mail(self, sender, subject, body, html=None):
+    """Callback function for sending mail."""
+    self.emails.append((sender, subject, body, html))
+  
+  def createMockData(self, data):
+    """Create mock data for FetchContentPipeline"""
+    input_file = files.blobstore.create()
+    with files.open(input_file, "a") as f:
+      with records.RecordsWriter(f) as w:
+        key = str(data[0])
+        value = str(data[1])
+        proto = file_service_pb.KeyValue()
+        proto.set_key(key)
+        proto.set_value(value)
+        w.write(proto.Encode())
+
+    files.finalize(input_file)
+    input_file = files.blobstore.get_file_name(
+        files.blobstore.get_blob_key(input_file))
+    
+    return input_file
+  
+  def testSuccessfulRun(self):
+    file_name1 = self.createMockData(("https://developers.google.com/appengine/", "http://k.yimg.jp/images/top/sp/logo.gif"))
+    file_name2 = self.createMockData(("https://developers.google.com/appengine/", "/appengine/images/slide1.png"))
+    datum = CrawlDbDatum(
+        parent =ndb.Key(CrawlDbDatum, "https://developers.google.com/appengine/"),
+        url="https://developers.google.com/appengine/",
+        extract_domain_url="https://developers.google.com",
+        last_status=pipelines.UNFETCHED)
+    datum.put()
+    resource = self.getResource("slide1.png")
+    static_content = resource.read()
+    self.setReturnValue(content=static_content,
+                        headers={"Content-Length": len(static_content),
+                                 "Content-Type": "image/png"})
+    p = pipelines._FetchContentPipeline("FetchContentPipeline", [file_name1, file_name2])
+    p.start()
+    test_support.execute_until_empty(self.taskqueue)
+    finished_map = pipelines._FetchSetsBufferPipeline.from_id(p.pipeline_id)
+    
+    # Can open files
+    file_paths = finished_map.outputs.default.value
+    self.assertTrue(len(file_paths) > 0)
+    self.assertTrue(file_paths[0].startswith("/blobstore/"))
+
+    reader = input_readers.RecordsReader(file_paths, 0)
+    for binary_record in reader:
+      proto = file_service_pb.KeyValue()
+      proto.ParseFromString(binary_record)
+      key = proto.key()
+      value = proto.value()
+      self.assertTrue(key is not None)
+      self.assertTrue(value is not None)
+
+    query = CrawlDbDatum.query(CrawlDbDatum.url=="https://developers.google.com/appengine/")
+    crawl_db_datums = query.fetch()
+    self.assertTrue(len(crawl_db_datums)>0)
+    key = crawl_db_datums[0].key
+    content_datums = ContentDbDatum.query(ancestor=key).fetch()
+    self.assertEqual(2, len(content_datums))
 
 class CleanPipelineTest(testutil.HandlerTestBase):
   """Test for CleanPipelineTest. """
@@ -471,7 +445,6 @@ class CleanPipelineTest(testutil.HandlerTestBase):
     """Test clean pipeline."""
     createMockFetchedDatum("http://foo.html", "Content", pipelines.FETCHED)
     createMockFetchedDatum("http://bar.html", "Content", pipelines.SKIPPED)
-    createMockFetchedDatum("http://faz.html", "Content", pipelines.FETCHED, score=0.5)
     createMockFetchedDatum("http://baz.html", "Content", pipelines.UNFETCHED)
     p = pipelines.CleanDatumPipeline("CleanDatumPipeline",
         params={
@@ -485,14 +458,8 @@ class CleanPipelineTest(testutil.HandlerTestBase):
     self.assertEquals(0, len(entities))
     entities = CrawlDbDatum.query(CrawlDbDatum.url== "http://bar.html").fetch()
     self.assertEquals(0, len(entities))
-    entities = CrawlDbDatum.query(CrawlDbDatum.url== "http://faz.html").fetch()
-    self.assertEquals(1, len(entities))
-    entity = entities[0]
-    fetched_datum = FetchedDatum.get_by_id(entity.url)
-    self.assertTrue(fetched_datum is None)
     entities = CrawlDbDatum.query(CrawlDbDatum.url=="http://baz.html").fetch()
     self.assertEquals(1, len(entities))
-    entity = entities[0]
 
 if __name__ == "__main__":
   unittest.main()

@@ -127,7 +127,7 @@ def _get_content_size(configured_content_sizes, content_type):
 class SimpleHttpFetcher(FetcherBase):
   """To fetch the web pages."""
 
-  def __init__(self, max_shards, fetcher_policy=None ):
+  def __init__(self, max_shards, fetcher_policy=None):
     """Initializes a SimpleHttpFetcher class.
   
     Args:
@@ -156,7 +156,6 @@ class SimpleHttpFetcher(FetcherBase):
       RedirectError: if redirect_mode is FOLLOW_NONE, and HTTP status is
         redirected.
     """
-    
     self._read_start_time = self._time()
     is_follow_redirects = self._fetcher_policy.redirect_mode == configuration.FOLLOW_ALL
     result = urlfetch.fetch(url = fetch_url,
@@ -229,24 +228,14 @@ class SimpleHttpFetcher(FetcherBase):
     #Truncate content if target content size is lager than max content size
     content = content[:target_length]
     #Toss truncated image content.
-    content_text = ""
-    content_binary = None
     if mime_type and mime_type not in TEXT_MIME_TYPES:
       if truncated:
         raise errors.AbortedFetchError("%s Truncated image" % fetch_url)
-      else:
-        if re.search("\+xml", mime_type):
-          content_text = content
-        else:
-          content_binary = content
-    else:
-      content_text = content
 
     return {"url": fetch_url,
             "fetched_url": fetched_url,
             "time": self._time() - self._read_start_time,
-            "content_text": content_text,
-            "content_binary": content_binary,
+            "content": content,
             "content_length": int(target_length),
             "mime_type": mime_type,
             "read_rate": int(read_rate),

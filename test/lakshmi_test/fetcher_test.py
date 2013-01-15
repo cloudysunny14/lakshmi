@@ -93,7 +93,7 @@ class SimpleHttpFetcherTest(testutil.FetchTestBase):
     result_right = simple_http_fetcher.get(url)
     self.assertEqual(1000, result_left.get("content_length"))
     self.assertEqual(1000, result_right.get("content_length"))
-    map(self.assertLR, result_left.get("content_text"), result_right.get("content_text"))
+    map(self.assertLR, result_left.get("content"), result_right.get("content"))
     
     resource = self.getResource("mining.png")
     static_content = resource.read()

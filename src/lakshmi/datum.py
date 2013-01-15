@@ -19,14 +19,15 @@ from google.appengine.ext import ndb
 class CrawlDbDatum(ndb.Model):
   """Holds accumulated state of crawl execution.
   CrawlDbDatum is stored in datastore.
-  
+  This entity holds status of seed urls.
+  last_status property is using as criteria for fetch target.
+  Entity's ancestor key is setting target url.
+
   Properties:
     url: the url for fetch
     last_fetched: last time of fetch
     last_updated: last time of update
     last_status: the status of last fetch
-    crawl_depth: the crawl depth
-    page_score: the score of page
   """
   #reason of indexed=False is saving the datastore write operation.
   url = ndb.StringProperty()
@@ -38,8 +39,6 @@ class CrawlDbDatum(ndb.Model):
                              auto_now_add=True,
                              indexed=False)
   last_status = ndb.IntegerProperty()
-  crawl_depth = ndb.IntegerProperty(indexed=False)
-  page_score = ndb.FloatProperty(indexed=False)
   
   @classmethod
   def kind(cls):
@@ -55,16 +54,18 @@ class CrawlDbDatum(ndb.Model):
       return entity
     return None
   
-class FetchedDatum(ndb.Model):
+class FetchedDbDatum(ndb.Model):
   """Hold the fetched result.
-  FetchedDatum is stored in datastore.
-  
+  FetchedDbDatum is stored in datastore,
+  whitch entity is fetched content of target page,
+  that could store text content only.
+  Also holds other status of fetch.
+
   Properties:
     url: base url.
     fetched_url: the fetched url.
     fetch_time: the time of fetch.
-    content_text: the text type of content.
-    content_binary: the binary type of content.
+    fetched_content: the html content of page.
     content_type: the content type.
     content_size: the content size.
     response_rate: the response rate.
@@ -73,8 +74,7 @@ class FetchedDatum(ndb.Model):
   url = ndb.StringProperty(indexed=False)
   fetched_url = ndb.StringProperty(indexed=False)
   fetch_time = ndb.FloatProperty(indexed=False)
-  content_text = ndb.TextProperty(indexed=False)
-  content_binary = ndb.BlobProperty(indexed=False)
+  fetched_content = ndb.TextProperty(indexed=False)
   content_type = ndb.StringProperty(indexed=False)
   content_size = ndb.IntegerProperty(indexed=False)
   response_rate = ndb.IntegerProperty(indexed=False)
@@ -82,4 +82,44 @@ class FetchedDatum(ndb.Model):
 
   @classmethod
   def kind(cls):
-    return "FetchedDatum"
+    return "FetchedDbDatum"
+
+class ContentDbDatum(ndb.Model):
+  """
+  Hold the links of page.
+  LinkDbDatum is stored in datastore,
+  This entity's ancestor key is setting target page's url.
+  Fetched contents are Storing to blobstore.
+
+  Properties:
+    fetched_url: the url of fetched.
+    stored_url: the url content is stored.
+    content_type: content type.
+    content_size: the size of content.
+    http_headers: the http headers.
+  """
+  fetched_url = ndb.StringProperty(indexed=False)
+  stored_url = ndb.StringProperty(indexed=False)
+  content_type = ndb.StringProperty(indexed=False)
+  content_size = ndb.IntegerProperty(indexed=False)
+  http_headers = ndb.TextProperty(indexed=False)
+
+  @classmethod
+  def kind(cls):
+    return "ContentDbDatum"
+
+class LinkDbDatum(ndb.Model):
+  """This model is sample. Hold the links of page.
+  LinkDbDatum is stored in datastore,
+  which entity is extracted links from page.
+  
+  Note:this entity is storing in your definition function.
+
+  Properties:
+    link_url: the url of link.
+  """
+  link_url = ndb.StringProperty(indexed=False)
+
+  @classmethod
+  def kind(cls):
+    return "LinkDbDatum"
